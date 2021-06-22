@@ -14,7 +14,7 @@ and authenticators are available:
 * ``OAUTH2`` for :doc:`oauth2`
 * ``CERTIFICATE`` for certificate authentication
 * ``JWT`` for Java Web Token (JWT) authentication
-* ``KERBEROS`` for :doc:`Kerberos authentication <server>`
+* ``KERBEROS`` for :doc:`kerberos`
 
 Get started with a basic password authentication configuration backed by a
 :doc:`password file <password-file>`:
@@ -51,7 +51,7 @@ configuration files:
     password-authenticator.config-files=etc/ldap1.properties,etc/ldap2.properties,etc/password.properties
 
 In the preceding example, the configuration files ``ldap1.properties`` and
-``ldap1.properties`` are regular :doc:`LDAP authenticator configuration files
+``ldap2.properties`` are regular :doc:`LDAP authenticator configuration files
 <ldap>`. The ``password.properties`` is a :doc:`password file authenticator
 configuration file <password-file>`.
 

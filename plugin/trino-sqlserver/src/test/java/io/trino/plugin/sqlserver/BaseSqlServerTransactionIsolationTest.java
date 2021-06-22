@@ -16,6 +16,7 @@ package io.trino.plugin.sqlserver;
 import io.trino.testing.AbstractTestQueryFramework;
 import io.trino.testing.MaterializedResult;
 import io.trino.testing.QueryRunner;
+import io.trino.testing.sql.SqlExecutor;
 import org.testng.annotations.Test;
 
 import java.util.List;
@@ -33,9 +34,7 @@ public abstract class BaseSqlServerTransactionIsolationTest
     protected QueryRunner createQueryRunner()
             throws Exception
     {
-        TestingSqlServer sqlServer = closeAfterClass(new TestingSqlServer());
-        sqlServer.start();
-        configureDatabase(sqlServer);
+        TestingSqlServer sqlServer = closeAfterClass(new TestingSqlServer(this::configureDatabase));
         return createSqlServerQueryRunner(
                 sqlServer,
                 Map.of(),
@@ -43,7 +42,7 @@ public abstract class BaseSqlServerTransactionIsolationTest
                 List.of(NATION));
     }
 
-    protected abstract void configureDatabase(TestingSqlServer sqlServer);
+    protected abstract void configureDatabase(SqlExecutor executor, String databaseName);
 
     @Test
     public void testCreateReadTable()
@@ -59,7 +58,7 @@ public abstract class BaseSqlServerTransactionIsolationTest
     {
         assertUpdate("CREATE TABLE ctas_describe AS SELECT regionkey, nationkey, comment FROM tpch.tiny.nation", "SELECT count(*) FROM nation");
 
-        MaterializedResult expectedColumns = MaterializedResult.resultBuilder(getQueryRunner().getDefaultSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
+        MaterializedResult expectedColumns = MaterializedResult.resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR, VARCHAR)
                 .row("regionkey", "bigint", "", "")
                 .row("nationkey", "bigint", "", "")
                 .row("comment", "varchar(152)", "", "")
@@ -68,7 +67,7 @@ public abstract class BaseSqlServerTransactionIsolationTest
         MaterializedResult actualColumns = computeActual("DESCRIBE ctas_describe");
         assertThat(actualColumns).isEqualTo(expectedColumns);
 
-        MaterializedResult expectedTables = MaterializedResult.resultBuilder(getQueryRunner().getDefaultSession(), VARCHAR)
+        MaterializedResult expectedTables = MaterializedResult.resultBuilder(getSession(), VARCHAR)
                 .row("ctas_describe")
                 .build();
 

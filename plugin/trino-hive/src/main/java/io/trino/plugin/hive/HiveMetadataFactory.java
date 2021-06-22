@@ -57,13 +57,12 @@ public class HiveMetadataFactory
     private final Executor updateExecutor;
     private final String trinoVersion;
     private final HiveRedirectionsProvider hiveRedirectionsProvider;
-    private final HiveMaterializedViewMetadata hiveMaterializedViewMetadata;
+    private final HiveMaterializedViewMetadataFactory hiveMaterializedViewMetadataFactory;
     private final AccessControlMetadataFactory accessControlMetadataFactory;
     private final Optional<Duration> hiveTransactionHeartbeatInterval;
     private final ScheduledExecutorService heartbeatService;
 
     @Inject
-    @SuppressWarnings("deprecation")
     public HiveMetadataFactory(
             CatalogName catalogName,
             HiveConfig hiveConfig,
@@ -78,7 +77,7 @@ public class HiveMetadataFactory
             JsonCodec<PartitionUpdate> partitionUpdateCodec,
             NodeVersion nodeVersion,
             HiveRedirectionsProvider hiveRedirectionsProvider,
-            HiveMaterializedViewMetadata hiveMaterializedViewMetadata,
+            HiveMaterializedViewMetadataFactory hiveMaterializedViewMetadataFactory,
             AccessControlMetadataFactory accessControlMetadataFactory)
     {
         this(
@@ -104,7 +103,7 @@ public class HiveMetadataFactory
                 heartbeatService,
                 nodeVersion.toString(),
                 hiveRedirectionsProvider,
-                hiveMaterializedViewMetadata,
+                hiveMaterializedViewMetadataFactory,
                 accessControlMetadataFactory);
     }
 
@@ -131,7 +130,7 @@ public class HiveMetadataFactory
             ScheduledExecutorService heartbeatService,
             String trinoVersion,
             HiveRedirectionsProvider hiveRedirectionsProvider,
-            HiveMaterializedViewMetadata hiveMaterializedViewMetadata,
+            HiveMaterializedViewMetadataFactory hiveMaterializedViewMetadataFactory,
             AccessControlMetadataFactory accessControlMetadataFactory)
     {
         this.catalogName = requireNonNull(catalogName, "catalogName is null");
@@ -151,7 +150,7 @@ public class HiveMetadataFactory
         this.partitionUpdateCodec = requireNonNull(partitionUpdateCodec, "partitionUpdateCodec is null");
         this.trinoVersion = requireNonNull(trinoVersion, "trinoVersion is null");
         this.hiveRedirectionsProvider = requireNonNull(hiveRedirectionsProvider, "hiveRedirectionsProvider is null");
-        this.hiveMaterializedViewMetadata = requireNonNull(hiveMaterializedViewMetadata, "hiveMaterializedViewMetadata is null");
+        this.hiveMaterializedViewMetadataFactory = requireNonNull(hiveMaterializedViewMetadataFactory, "hiveMaterializedViewMetadataFactory is null");
         this.accessControlMetadataFactory = requireNonNull(accessControlMetadataFactory, "accessControlMetadataFactory is null");
         this.hiveTransactionHeartbeatInterval = requireNonNull(hiveTransactionHeartbeatInterval, "hiveTransactionHeartbeatInterval is null");
 
@@ -170,9 +169,11 @@ public class HiveMetadataFactory
     @Override
     public TransactionalMetadata create()
     {
+        HiveMetastoreClosure hiveMetastoreClosure = new HiveMetastoreClosure(
+                memoizeMetastore(this.metastore, perTransactionCacheMaximumSize)); // per-transaction cache
         SemiTransactionalHiveMetastore metastore = new SemiTransactionalHiveMetastore(
                 hdfsEnvironment,
-                new HiveMetastoreClosure(memoizeMetastore(this.metastore, perTransactionCacheMaximumSize)), // per-transaction cache
+                hiveMetastoreClosure,
                 renameExecution,
                 dropExecutor,
                 updateExecutor,
@@ -196,7 +197,7 @@ public class HiveMetadataFactory
                 trinoVersion,
                 new MetastoreHiveStatisticsProvider(metastore),
                 hiveRedirectionsProvider,
-                hiveMaterializedViewMetadata,
+                hiveMaterializedViewMetadataFactory.create(hiveMetastoreClosure),
                 accessControlMetadataFactory.create(metastore));
     }
 }

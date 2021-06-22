@@ -50,6 +50,8 @@ import static io.trino.spi.type.TinyintType.TINYINT;
 import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static io.trino.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.trino.spi.type.VarcharType.createVarcharType;
+import static io.trino.testing.sql.TestTable.randomTableSuffix;
+import static java.lang.String.format;
 import static java.time.ZoneOffset.UTC;
 
 public abstract class BaseSqlServerTypeMapping
@@ -174,8 +176,6 @@ public abstract class BaseSqlServerTypeMapping
                 .addRoundTrip("char(32)", "CAST('攻殻機動隊' AS char(32))", createCharType(32), "CAST('攻殻機動隊' AS char(32))")
                 .addRoundTrip("char(20)", "CAST('😂' AS char(20))", createCharType(20), "CAST('😂' AS char(20))")
                 .addRoundTrip("char(77)", "CAST('Ну, погоди!' AS char(77))", createCharType(77), "CAST('Ну, погоди!' AS char(77))")
-                // testing mapping char > 4000 -> varchar(max)
-                .addRoundTrip("char(4001)", "'text_c'", createUnboundedVarcharType(), "CAST('text_c' AS varchar)")
                 .execute(getQueryRunner(), trinoCreateAndInsert(getSession(), "test_char"))
                 .execute(getQueryRunner(), trinoCreateAsSelect("test_char"));
     }
@@ -195,7 +195,7 @@ public abstract class BaseSqlServerTypeMapping
     {
         // testing mapping char > 4000 -> varchar(max)
         SqlDataTypeTest.create()
-                .addRoundTrip("char(4001)", "'text_c'", createUnboundedVarcharType(), "CAST('text_c' AS varchar)")
+                .addRoundTrip("char(4001)", "'text_c'", createUnboundedVarcharType(), "VARCHAR 'text_c'")
                 .execute(getQueryRunner(), trinoCreateAndInsert(getSession(), "test_long_char"))
                 .execute(getQueryRunner(), trinoCreateAsSelect("test_long_char"));
     }
@@ -238,7 +238,7 @@ public abstract class BaseSqlServerTypeMapping
     {
         // testing mapping varchar > 4000 -> varchar(max)
         SqlDataTypeTest.create()
-                .addRoundTrip("varchar(4001)", "'text_c'", createUnboundedVarcharType(), "CAST('text_c' AS varchar)")
+                .addRoundTrip("varchar(4001)", "'text_c'", createUnboundedVarcharType(), "VARCHAR 'text_c'")
                 .execute(getQueryRunner(), trinoCreateAndInsert(getSession(), "test_long_varchar"))
                 .execute(getQueryRunner(), trinoCreateAsSelect("test_long_varchar"));
     }
@@ -247,15 +247,15 @@ public abstract class BaseSqlServerTypeMapping
     public void testTrinoUnboundedVarchar()
     {
         SqlDataTypeTest.create()
-                .addRoundTrip("varchar", "'text_a'", createUnboundedVarcharType(), "CAST('text_a' AS varchar)")
-                .addRoundTrip("varchar", "'text_b'", createUnboundedVarcharType(), "CAST('text_b' AS varchar)")
-                .addRoundTrip("varchar", "'text_d'", createUnboundedVarcharType(), "CAST('text_d' AS varchar)")
-                .addRoundTrip("varchar", "CAST('攻殻機動隊' AS varchar)", createUnboundedVarcharType(), "CAST('攻殻機動隊' AS varchar)")
-                .addRoundTrip("varchar", "CAST('攻殻機動隊' AS varchar)", createUnboundedVarcharType(), "CAST('攻殻機動隊' AS varchar)")
-                .addRoundTrip("varchar", "CAST('攻殻機動隊' AS varchar)", createUnboundedVarcharType(), "CAST('攻殻機動隊' AS varchar)")
-                .addRoundTrip("varchar", "CAST('😂' AS varchar)", createUnboundedVarcharType(), "CAST('😂' AS varchar)")
-                .addRoundTrip("varchar", "CAST('Ну, погоди!' AS varchar)", createUnboundedVarcharType(), "CAST('Ну, погоди!' AS varchar)")
-                .addRoundTrip("varchar", "'text_f'", createUnboundedVarcharType(), "CAST('text_f' AS varchar)")
+                .addRoundTrip("varchar", "'text_a'", createUnboundedVarcharType(), "VARCHAR 'text_a'")
+                .addRoundTrip("varchar", "'text_b'", createUnboundedVarcharType(), "VARCHAR 'text_b'")
+                .addRoundTrip("varchar", "'text_d'", createUnboundedVarcharType(), "VARCHAR 'text_d'")
+                .addRoundTrip("varchar", "VARCHAR '攻殻機動隊'", createUnboundedVarcharType(), "VARCHAR '攻殻機動隊'")
+                .addRoundTrip("varchar", "VARCHAR '攻殻機動隊'", createUnboundedVarcharType(), "VARCHAR '攻殻機動隊'")
+                .addRoundTrip("varchar", "VARCHAR '攻殻機動隊'", createUnboundedVarcharType(), "VARCHAR '攻殻機動隊'")
+                .addRoundTrip("varchar", "VARCHAR '😂'", createUnboundedVarcharType(), "VARCHAR '😂'")
+                .addRoundTrip("varchar", "VARCHAR 'Ну, погоди!'", createUnboundedVarcharType(), "VARCHAR 'Ну, погоди!'")
+                .addRoundTrip("varchar", "'text_f'", createUnboundedVarcharType(), "VARCHAR 'text_f'")
                 .execute(getQueryRunner(), trinoCreateAndInsert(getSession(), "test_unbounded_varchar"))
                 .execute(getQueryRunner(), trinoCreateAsSelect("test_unbounded_varchar"));
     }
@@ -300,8 +300,14 @@ public abstract class BaseSqlServerTypeMapping
         LocalDate dateOfLocalTimeChangeBackwardAtMidnightInSomeZone = LocalDate.of(1983, 10, 1);
         checkIsDoubled(someZone, dateOfLocalTimeChangeBackwardAtMidnightInSomeZone.atStartOfDay().minusMinutes(1));
 
+        // BC dates not supported by SQL Server
         SqlDataTypeTest testsSqlServer = SqlDataTypeTest.create()
                 .addRoundTrip("date", "NULL", DATE, "CAST(NULL AS DATE)")
+                // first day of AD
+                .addRoundTrip("date", "'0001-01-01'", DATE, "DATE '0001-01-01'")
+                .addRoundTrip("date", "'0012-12-12'", DATE, "DATE '0012-12-12'")
+                // before julian->gregorian switch
+                .addRoundTrip("date", "'1500-01-01'", DATE, "DATE '1500-01-01'")
                 // before epoch
                 .addRoundTrip("date", "'1952-04-03'", DATE, "DATE '1952-04-03'")
                 .addRoundTrip("date", "'1970-01-01'", DATE, "DATE '1970-01-01'")
@@ -316,6 +322,11 @@ public abstract class BaseSqlServerTypeMapping
 
         SqlDataTypeTest testsTrino = SqlDataTypeTest.create()
                 .addRoundTrip("date", "NULL", DATE, "CAST(NULL AS DATE)")
+                // first day of AD
+                .addRoundTrip("date", "DATE '0001-01-01'", DATE, "DATE '0001-01-01'")
+                .addRoundTrip("date", "DATE '0012-12-12'", DATE, "DATE '0012-12-12'")
+                // before julian->gregorian switch
+                .addRoundTrip("date", "DATE '1500-01-01'", DATE, "DATE '1500-01-01'")
                 // before epoch
                 .addRoundTrip("date", "DATE '1952-04-03'", DATE, "DATE '1952-04-03'")
                 .addRoundTrip("date", "DATE '1970-01-01'", DATE, "DATE '1970-01-01'")
@@ -335,6 +346,22 @@ public abstract class BaseSqlServerTypeMapping
             testsSqlServer.execute(getQueryRunner(), session, sqlServerCreateAndInsert("test_date"));
             testsTrino.execute(getQueryRunner(), session, trinoCreateAsSelect(session, "test_date"));
             testsTrino.execute(getQueryRunner(), session, trinoCreateAndInsert(session, "test_date"));
+        }
+    }
+
+    @Test
+    public void testSqlServerDateUnsupported()
+    {
+        // SQL Server does not support > 4 digit years, this test will fail once > 4 digit years support will be added
+        String unsupportedDate = "\'11111-01-01\'";
+        String tableName = "test_date_unsupported" + randomTableSuffix();
+        assertUpdate(format("CREATE TABLE %s (test_date date)", tableName));
+        try {
+            assertQueryFails(format("INSERT INTO %s VALUES (date %s)", tableName, unsupportedDate),
+                    "Failed to insert data: Conversion failed when converting date and/or time from character string.");
+        }
+        finally {
+            assertUpdate("DROP TABLE " + tableName);
         }
     }
 
