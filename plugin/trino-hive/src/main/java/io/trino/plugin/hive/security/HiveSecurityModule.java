@@ -19,36 +19,28 @@ import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.trino.plugin.base.security.FileBasedAccessControlModule;
 import io.trino.plugin.base.security.ReadOnlySecurityModule;
 
-import static io.airlift.configuration.ConditionalModule.installModuleIf;
-import static io.airlift.configuration.ConfigurationModule.installModules;
-import static java.util.Objects.requireNonNull;
+import static io.airlift.configuration.ConditionalModule.conditionalModule;
+import static io.airlift.configuration.ConfigurationAwareModule.combine;
 
 public class HiveSecurityModule
         extends AbstractConfigurationAwareModule
 {
-    private final String catalogName;
-
-    public HiveSecurityModule(String catalogName)
-    {
-        this.catalogName = requireNonNull(catalogName, "catalogName is null");
-    }
-
     @Override
     protected void setup(Binder binder)
     {
         bindSecurityModule(
                 "legacy",
-                installModules(
+                combine(
                         new LegacySecurityModule(),
                         new StaticAccessControlMetadataModule()));
         bindSecurityModule(
                 "file",
-                installModules(
-                        new FileBasedAccessControlModule(catalogName),
+                combine(
+                        new FileBasedAccessControlModule(),
                         new StaticAccessControlMetadataModule()));
         bindSecurityModule(
                 "read-only",
-                installModules(
+                combine(
                         new ReadOnlySecurityModule(),
                         new StaticAccessControlMetadataModule()));
         bindSecurityModule("sql-standard", new SqlStandardSecurityModule());
@@ -57,7 +49,7 @@ public class HiveSecurityModule
 
     private void bindSecurityModule(String name, Module module)
     {
-        install(installModuleIf(
+        install(conditionalModule(
                 SecurityConfig.class,
                 security -> name.equalsIgnoreCase(security.getSecuritySystem()),
                 module));

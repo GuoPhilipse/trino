@@ -173,13 +173,18 @@ public final class HiveWriteUtils
 
     public static RecordWriter createRecordWriter(Path target, JobConf conf, Properties properties, String outputFormatName, ConnectorSession session)
     {
+        return createRecordWriter(target, conf, properties, outputFormatName, session, Optional.empty());
+    }
+
+    public static RecordWriter createRecordWriter(Path target, JobConf conf, Properties properties, String outputFormatName, ConnectorSession session, Optional<TextHeaderWriter> textHeaderWriter)
+    {
         try {
             boolean compress = HiveConf.getBoolVar(conf, COMPRESSRESULT);
             if (outputFormatName.equals(MapredParquetOutputFormat.class.getName())) {
                 return ParquetRecordWriter.create(target, conf, properties, session);
             }
             if (outputFormatName.equals(HiveIgnoreKeyTextOutputFormat.class.getName())) {
-                return new TextRecordWriter(target, conf, properties, compress);
+                return new TextRecordWriter(target, conf, properties, compress, textHeaderWriter);
             }
             if (outputFormatName.equals(HiveSequenceFileOutputFormat.class.getName())) {
                 return new SequenceFileRecordWriter(target, conf, Text.class, compress);
@@ -521,6 +526,11 @@ public final class HiveWriteUtils
         catch (IOException e) {
             throw new TrinoException(HIVE_FILESYSTEM_ERROR, "Failed checking encryption status for path: " + path, e);
         }
+    }
+
+    public static boolean isFileCreatedByQuery(String fileName, String queryId)
+    {
+        return fileName.startsWith(queryId) || fileName.endsWith(queryId);
     }
 
     public static Path createTemporaryPath(ConnectorSession session, HdfsContext context, HdfsEnvironment hdfsEnvironment, Path targetPath)

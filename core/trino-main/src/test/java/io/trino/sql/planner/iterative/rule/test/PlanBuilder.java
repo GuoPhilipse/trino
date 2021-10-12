@@ -82,11 +82,13 @@ import io.trino.sql.planner.plan.TableFinishNode;
 import io.trino.sql.planner.plan.TableScanNode;
 import io.trino.sql.planner.plan.TableWriterNode;
 import io.trino.sql.planner.plan.TableWriterNode.DeleteTarget;
+import io.trino.sql.planner.plan.TableWriterNode.UpdateTarget;
 import io.trino.sql.planner.plan.TopNNode;
 import io.trino.sql.planner.plan.TopNRankingNode;
 import io.trino.sql.planner.plan.TopNRankingNode.RankingType;
 import io.trino.sql.planner.plan.UnionNode;
 import io.trino.sql.planner.plan.UnnestNode;
+import io.trino.sql.planner.plan.UpdateNode;
 import io.trino.sql.planner.plan.ValuesNode;
 import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.planner.plan.WindowNode.Specification;
@@ -95,7 +97,7 @@ import io.trino.sql.tree.FunctionCall;
 import io.trino.sql.tree.NullLiteral;
 import io.trino.sql.tree.Row;
 import io.trino.testing.TestingHandle;
-import io.trino.testing.TestingMetadata;
+import io.trino.testing.TestingMetadata.TestingColumnHandle;
 import io.trino.testing.TestingMetadata.TestingTableHandle;
 import io.trino.testing.TestingTransactionHandle;
 
@@ -606,7 +608,7 @@ public class PlanBuilder
 
         public TableScanBuilder setAssignmentsForSymbols(List<Symbol> symbols)
         {
-            return setAssignments(symbols.stream().collect(toImmutableMap(identity(), symbol -> new TestingMetadata.TestingColumnHandle(symbol.getName()))));
+            return setAssignments(symbols.stream().collect(toImmutableMap(identity(), symbol -> new TestingColumnHandle(symbol.getName()))));
         }
 
         public TableScanBuilder setAssignments(Map<Symbol, ColumnHandle> assignments)
@@ -692,6 +694,49 @@ public class PlanBuilder
                         TestingTransactionHandle.create(),
                         Optional.of(TestingHandle.INSTANCE))),
                 schemaTableName);
+    }
+
+    public TableFinishNode tableUpdate(SchemaTableName schemaTableName, PlanNode updateSource, Symbol updateRowId, List<Symbol> columnsToBeUpdated)
+    {
+        UpdateTarget updateTarget = updateTarget(
+                schemaTableName,
+                columnsToBeUpdated.stream()
+                        .map(Symbol::getName)
+                        .collect(toImmutableList()));
+        return new TableFinishNode(
+                idAllocator.getNextId(),
+                exchange(e -> e
+                        .addSource(new UpdateNode(
+                                idAllocator.getNextId(),
+                                updateSource,
+                                updateTarget,
+                                updateRowId,
+                                ImmutableList.<Symbol>builder()
+                                        .addAll(columnsToBeUpdated)
+                                        .add(updateRowId)
+                                        .build(),
+                                ImmutableList.of(updateRowId)))
+                        .addInputsSet(updateRowId)
+                        .singleDistributionPartitioningScheme(updateRowId)),
+                updateTarget,
+                updateRowId,
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private UpdateTarget updateTarget(SchemaTableName schemaTableName, List<String> columnsToBeUpdated)
+    {
+        return new UpdateTarget(
+                Optional.of(new TableHandle(
+                        new CatalogName("testConnector"),
+                        new TestingTableHandle(),
+                        TestingTransactionHandle.create(),
+                        Optional.of(TestingHandle.INSTANCE))),
+                schemaTableName,
+                columnsToBeUpdated,
+                columnsToBeUpdated.stream()
+                        .map(TestingColumnHandle::new)
+                        .collect(toImmutableList()));
     }
 
     public ExchangeNode gatheringExchange(ExchangeNode.Scope scope, PlanNode child)

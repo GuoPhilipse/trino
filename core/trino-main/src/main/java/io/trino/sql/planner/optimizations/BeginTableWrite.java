@@ -22,10 +22,12 @@ import io.trino.metadata.TableHandle;
 import io.trino.sql.planner.PlanNodeIdAllocator;
 import io.trino.sql.planner.SymbolAllocator;
 import io.trino.sql.planner.TypeProvider;
+import io.trino.sql.planner.plan.AssignUniqueId;
 import io.trino.sql.planner.plan.DeleteNode;
 import io.trino.sql.planner.plan.ExchangeNode;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.sql.planner.plan.JoinNode;
+import io.trino.sql.planner.plan.MarkDistinctNode;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.ProjectNode;
 import io.trino.sql.planner.plan.SemiJoinNode;
@@ -48,8 +50,8 @@ import io.trino.sql.planner.plan.UpdateNode;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.Iterables.getOnlyElement;
-import static io.trino.sql.planner.optimizations.QueryCardinalityUtil.isAtMostScalar;
 import static io.trino.sql.planner.plan.ChildReplacer.replaceChildren;
 import static io.trino.sql.planner.planprinter.PlanPrinter.textLogicalPlan;
 import static java.util.stream.Collectors.toSet;
@@ -254,7 +256,9 @@ public class BeginTableWrite
         private TableHandle findTableScanHandle(PlanNode node)
         {
             if (node instanceof TableScanNode) {
-                return ((TableScanNode) node).getTable();
+                TableScanNode tableScanNode = (TableScanNode) node;
+                checkArgument(((TableScanNode) node).isUpdateTarget(), "TableScanNode should be an updatable target");
+                return tableScanNode.getTable();
             }
             if (node instanceof FilterNode) {
                 return findTableScanHandle(((FilterNode) node).getSource());
@@ -267,9 +271,13 @@ public class BeginTableWrite
             }
             if (node instanceof JoinNode) {
                 JoinNode joinNode = (JoinNode) node;
-                if (joinNode.getType() == JoinNode.Type.INNER && isAtMostScalar(joinNode.getRight())) {
-                    return findTableScanHandle(joinNode.getLeft());
-                }
+                return findTableScanHandle(joinNode.getLeft());
+            }
+            if (node instanceof AssignUniqueId) {
+                return findTableScanHandle(((AssignUniqueId) node).getSource());
+            }
+            if (node instanceof MarkDistinctNode) {
+                return findTableScanHandle(((MarkDistinctNode) node).getSource());
             }
             throw new IllegalArgumentException("Invalid descendant for DeleteNode or UpdateNode: " + node.getClass().getName());
         }
@@ -303,11 +311,16 @@ public class BeginTableWrite
                 return replaceChildren(node, ImmutableList.of(source, ((SemiJoinNode) node).getFilteringSource()));
             }
             if (node instanceof JoinNode) {
-                JoinNode joinNode = (JoinNode) node;
-                if (joinNode.getType() == JoinNode.Type.INNER && isAtMostScalar(joinNode.getRight())) {
-                    PlanNode source = rewriteModifyTableScan(joinNode.getLeft(), handle);
-                    return replaceChildren(node, ImmutableList.of(source, joinNode.getRight()));
-                }
+                PlanNode source = rewriteModifyTableScan(((JoinNode) node).getLeft(), handle);
+                return replaceChildren(node, ImmutableList.of(source, ((JoinNode) node).getRight()));
+            }
+            if (node instanceof AssignUniqueId) {
+                PlanNode source = rewriteModifyTableScan(((AssignUniqueId) node).getSource(), handle);
+                return replaceChildren(node, ImmutableList.of(source));
+            }
+            if (node instanceof MarkDistinctNode) {
+                PlanNode source = rewriteModifyTableScan(((MarkDistinctNode) node).getSource(), handle);
+                return replaceChildren(node, ImmutableList.of(source));
             }
             throw new IllegalArgumentException("Invalid descendant for DeleteNode or UpdateNode: " + node.getClass().getName());
         }

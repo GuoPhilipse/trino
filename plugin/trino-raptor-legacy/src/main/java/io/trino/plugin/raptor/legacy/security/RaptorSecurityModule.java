@@ -20,30 +20,22 @@ import io.trino.plugin.base.security.AllowAllAccessControlModule;
 import io.trino.plugin.base.security.FileBasedAccessControlModule;
 import io.trino.plugin.base.security.ReadOnlySecurityModule;
 
-import static io.airlift.configuration.ConditionalModule.installModuleIf;
-import static java.util.Objects.requireNonNull;
+import static io.airlift.configuration.ConditionalModule.conditionalModule;
 
 public class RaptorSecurityModule
         extends AbstractConfigurationAwareModule
 {
-    private final String catalogName;
-
-    public RaptorSecurityModule(String catalogName)
-    {
-        this.catalogName = requireNonNull(catalogName, "catalogName is null");
-    }
-
     @Override
     protected void setup(Binder binder)
     {
         bindSecurityModule("none", new AllowAllAccessControlModule());
         bindSecurityModule("read-only", new ReadOnlySecurityModule());
-        bindSecurityModule("file", new FileBasedAccessControlModule(catalogName));
+        bindSecurityModule("file", new FileBasedAccessControlModule());
     }
 
     private void bindSecurityModule(String name, Module module)
     {
-        install(installModuleIf(
+        install(conditionalModule(
                 RaptorSecurityConfig.class,
                 security -> name.equalsIgnoreCase(security.getSecuritySystem()),
                 module));

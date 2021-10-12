@@ -53,6 +53,7 @@ import io.trino.spi.function.InvocationConvention;
 import io.trino.spi.function.OperatorType;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.security.GrantInfo;
+import io.trino.spi.security.Identity;
 import io.trino.spi.security.Privilege;
 import io.trino.spi.security.RoleGrant;
 import io.trino.spi.security.TrinoPrincipal;
@@ -466,54 +467,86 @@ public interface Metadata
     //
 
     /**
+     * Does the specified catalog manage security directly, or does it use system security management?
+     */
+    boolean isCatalogManagedSecurity(Session session, String catalog);
+
+    /**
+     * Does the specified role exist.
+     *
+     * @param catalog if present, the role catalog; otherwise the role is a system role
+     */
+    boolean roleExists(Session session, String role, Optional<String> catalog);
+
+    /**
      * Creates the specified role in the specified catalog.
      *
      * @param grantor represents the principal specified by WITH ADMIN statement
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    void createRole(Session session, String role, Optional<TrinoPrincipal> grantor, String catalog);
+    void createRole(Session session, String role, Optional<TrinoPrincipal> grantor, Optional<String> catalog);
 
     /**
      * Drops the specified role in the specified catalog.
+     *
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    void dropRole(Session session, String role, String catalog);
+    void dropRole(Session session, String role, Optional<String> catalog);
 
     /**
      * List available roles in specified catalog.
+     *
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    Set<String> listRoles(Session session, String catalog);
+    Set<String> listRoles(Session session, Optional<String> catalog);
 
     /**
      * List all role grants in the specified catalog,
      * optionally filtered by passed role, grantee, and limit predicates.
+     *
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    Set<RoleGrant> listAllRoleGrants(Session session, String catalog, Optional<Set<String>> roles, Optional<Set<String>> grantees, OptionalLong limit);
+    Set<RoleGrant> listAllRoleGrants(Session session, Optional<String> catalog, Optional<Set<String>> roles, Optional<Set<String>> grantees, OptionalLong limit);
 
     /**
      * List roles grants in the specified catalog for a given principal, not recursively.
+     *
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    Set<RoleGrant> listRoleGrants(Session session, String catalog, TrinoPrincipal principal);
+    Set<RoleGrant> listRoleGrants(Session session, Optional<String> catalog, TrinoPrincipal principal);
 
     /**
      * Grants the specified roles to the specified grantees in the specified catalog
      *
      * @param grantor represents the principal specified by GRANTED BY statement
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    void grantRoles(Session session, Set<String> roles, Set<TrinoPrincipal> grantees, boolean adminOption, Optional<TrinoPrincipal> grantor, String catalog);
+    void grantRoles(Session session, Set<String> roles, Set<TrinoPrincipal> grantees, boolean adminOption, Optional<TrinoPrincipal> grantor, Optional<String> catalog);
 
     /**
      * Revokes the specified roles from the specified grantees in the specified catalog
      *
      * @param grantor represents the principal specified by GRANTED BY statement
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    void revokeRoles(Session session, Set<String> roles, Set<TrinoPrincipal> grantees, boolean adminOption, Optional<TrinoPrincipal> grantor, String catalog);
+    void revokeRoles(Session session, Set<String> roles, Set<TrinoPrincipal> grantees, boolean adminOption, Optional<TrinoPrincipal> grantor, Optional<String> catalog);
 
     /**
      * List applicable roles, including the transitive grants, for the specified principal
+     *
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
-    Set<RoleGrant> listApplicableRoles(Session session, TrinoPrincipal principal, String catalog);
+    Set<RoleGrant> listApplicableRoles(Session session, TrinoPrincipal principal, Optional<String> catalog);
 
     /**
-     * List applicable roles, including the transitive grants, in given session
+     * List applicable system roles, including the transitive grants, for the given identity.
+     */
+    Set<String> listEnabledRoles(Identity identity);
+
+    /**
+     * List applicable roles, including the transitive grants, in given catalog
+     *
+     * @param catalog if present, the role catalog; otherwise the role is a system role
      */
     Set<String> listEnabledRoles(Session session, String catalog);
 
@@ -657,6 +690,11 @@ public interface Metadata
      * The method is used by the engine to determine if a materialized view is current with respect to the tables it depends on.
      */
     MaterializedViewFreshness getMaterializedViewFreshness(Session session, QualifiedObjectName name);
+
+    /**
+     * Rename the specified materialized view.
+     */
+    void renameMaterializedView(Session session, QualifiedObjectName existingViewName, QualifiedObjectName newViewName);
 
     /**
      * Returns the result of redirecting the table scan on a given table to a different table.

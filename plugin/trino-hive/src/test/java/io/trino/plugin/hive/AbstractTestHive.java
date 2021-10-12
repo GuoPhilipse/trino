@@ -257,6 +257,8 @@ import static io.trino.plugin.hive.metastore.SortingColumn.Order.DESCENDING;
 import static io.trino.plugin.hive.metastore.StorageFormat.fromHiveStorageFormat;
 import static io.trino.plugin.hive.metastore.cache.CachingHiveMetastore.cachingHiveMetastore;
 import static io.trino.plugin.hive.util.HiveBucketing.BucketingVersion.BUCKETING_V1;
+import static io.trino.plugin.hive.util.HiveUtil.DELTA_LAKE_PROVIDER;
+import static io.trino.plugin.hive.util.HiveUtil.SPARK_TABLE_PROVIDER_KEY;
 import static io.trino.plugin.hive.util.HiveUtil.columnExtraInfo;
 import static io.trino.plugin.hive.util.HiveUtil.toPartitionValues;
 import static io.trino.plugin.hive.util.HiveWriteUtils.createDirectory;
@@ -315,6 +317,8 @@ import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
+// staging directory is shared mutable state
+@Test(singleThreaded = true)
 public abstract class AbstractTestHive
 {
     private static final Logger log = Logger.get(AbstractTestHive.class);
@@ -827,6 +831,9 @@ public abstract class AbstractTestHive
                             ImmutableMap.of(),
                             TupleDomain.all()));
                 },
+                ImmutableSet.of(
+                        new PartitionsSystemTableProvider(partitionManager),
+                        new PropertiesSystemTableProvider()),
                 (metastore) -> new NoneHiveMaterializedViewMetadata()
                 {
                     @Override
@@ -2863,7 +2870,7 @@ public abstract class AbstractTestHive
                 .setOwner(session.getUser())
                 .setTableType(MANAGED_TABLE.name())
                 .setDataColumns(List.of(new Column("a_column", HIVE_STRING, Optional.empty())))
-                .setParameter(HiveMetadata.SPARK_TABLE_PROVIDER_KEY, HiveMetadata.DELTA_LAKE_PROVIDER);
+                .setParameter(SPARK_TABLE_PROVIDER_KEY, DELTA_LAKE_PROVIDER);
         table.getStorageBuilder()
                 .setStorageFormat(fromHiveStorageFormat(PARQUET))
                 .setLocation(getTableDefaultLocation(
@@ -4460,7 +4467,7 @@ public abstract class AbstractTestHive
             // delete ds=2015-07-03
             session = newSession();
             TupleDomain<ColumnHandle> tupleDomain = TupleDomain.fromFixedValues(ImmutableMap.of(dsColumnHandle, NullableValue.of(createUnboundedVarcharType(), utf8Slice("2015-07-03"))));
-            Constraint constraint = new Constraint(tupleDomain, convertToPredicate(tupleDomain));
+            Constraint constraint = new Constraint(tupleDomain, convertToPredicate(tupleDomain), tupleDomain.getDomains().orElseThrow().keySet());
             tableHandle = applyFilter(metadata, tableHandle, constraint);
             tableHandle = metadata.applyDelete(session, tableHandle).get();
             metadata.executeDelete(session, tableHandle);
@@ -4495,7 +4502,7 @@ public abstract class AbstractTestHive
             session = newSession();
             TupleDomain<ColumnHandle> tupleDomain2 = TupleDomain.withColumnDomains(
                     ImmutableMap.of(dsColumnHandle, Domain.create(ValueSet.ofRanges(Range.range(createUnboundedVarcharType(), utf8Slice("2015-07-01"), true, utf8Slice("2015-07-02"), true)), false)));
-            Constraint constraint2 = new Constraint(tupleDomain2, convertToPredicate(tupleDomain2));
+            Constraint constraint2 = new Constraint(tupleDomain2, convertToPredicate(tupleDomain2), tupleDomain2.getDomains().orElseThrow().keySet());
             tableHandle = applyFilter(metadata, tableHandle, constraint2);
             tableHandle = metadata.applyDelete(session, tableHandle).get();
             metadata.executeDelete(session, tableHandle);
@@ -5468,7 +5475,7 @@ public abstract class AbstractTestHive
                 HiveColumnHandle dsColumnHandle = (HiveColumnHandle) metadata.getColumnHandles(session, tableHandle).get("pk2");
                 TupleDomain<ColumnHandle> tupleDomain = TupleDomain.withColumnDomains(ImmutableMap.of(
                         dsColumnHandle, domainToDrop));
-                Constraint constraint = new Constraint(tupleDomain, convertToPredicate(tupleDomain));
+                Constraint constraint = new Constraint(tupleDomain, convertToPredicate(tupleDomain), tupleDomain.getDomains().orElseThrow().keySet());
                 tableHandle = applyFilter(metadata, tableHandle, constraint);
                 tableHandle = metadata.applyDelete(session, tableHandle).get();
                 metadata.executeDelete(session, tableHandle);

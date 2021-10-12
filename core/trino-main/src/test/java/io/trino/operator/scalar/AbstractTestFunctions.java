@@ -28,6 +28,7 @@ import io.trino.spi.type.SqlDecimal;
 import io.trino.spi.type.SqlTimestamp;
 import io.trino.spi.type.Type;
 import io.trino.sql.analyzer.FeaturesConfig;
+import org.intellij.lang.annotations.Language;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 
@@ -88,7 +89,7 @@ public abstract class AbstractTestFunctions
         functionAssertions = null;
     }
 
-    protected void assertFunction(String projection, Type expectedType, Object expected)
+    protected void assertFunction(@Language("SQL") String projection, Type expectedType, Object expected)
     {
         functionAssertions.assertFunction(projection, expectedType, expected);
     }
@@ -98,7 +99,7 @@ public abstract class AbstractTestFunctions
         functionAssertions.assertFunction(format("\"%s\"(%s)", mangleOperatorName(operator), value), expectedType, expected);
     }
 
-    protected void assertDecimalFunction(String statement, SqlDecimal expectedResult)
+    protected void assertDecimalFunction(@Language("SQL") String statement, SqlDecimal expectedResult)
     {
         assertFunction(
                 statement,
@@ -111,12 +112,12 @@ public abstract class AbstractTestFunctions
         functionAssertions.assertInvalidFunction(projection, errorCode, message);
     }
 
-    protected void assertInvalidFunction(String projection, String message)
+    protected void assertInvalidFunction(@Language("SQL") String projection, String message)
     {
         functionAssertions.assertInvalidFunction(projection, INVALID_FUNCTION_ARGUMENT, message);
     }
 
-    protected void assertInvalidFunction(String projection, ErrorCodeSupplier expectedErrorCode)
+    protected void assertInvalidFunction(@Language("SQL") String projection, ErrorCodeSupplier expectedErrorCode)
     {
         functionAssertions.assertInvalidFunction(projection, expectedErrorCode);
     }

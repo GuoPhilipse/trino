@@ -76,7 +76,7 @@ import io.trino.sql.tree.LambdaArgumentDeclaration;
 import io.trino.sql.tree.LambdaExpression;
 import io.trino.sql.tree.LikePredicate;
 import io.trino.sql.tree.Literal;
-import io.trino.sql.tree.LogicalBinaryExpression;
+import io.trino.sql.tree.LogicalExpression;
 import io.trino.sql.tree.Node;
 import io.trino.sql.tree.NodeRef;
 import io.trino.sql.tree.NotExpression;
@@ -120,6 +120,7 @@ import static com.google.common.base.Throwables.throwIfInstanceOf;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static io.airlift.slice.SliceUtf8.countCodePoints;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.StandardErrorCode.TYPE_MISMATCH;
@@ -129,6 +130,7 @@ import static io.trino.spi.function.InvocationConvention.InvocationReturnConvent
 import static io.trino.spi.function.InvocationConvention.simpleConvention;
 import static io.trino.spi.function.OperatorType.EQUAL;
 import static io.trino.spi.function.OperatorType.HASH_CODE;
+import static io.trino.spi.type.Chars.trimTrailingSpaces;
 import static io.trino.spi.type.TypeUtils.readNativeValue;
 import static io.trino.spi.type.TypeUtils.writeNativeValue;
 import static io.trino.spi.type.VarcharType.createVarcharType;
@@ -939,55 +941,63 @@ public class ExpressionInterpreter
         }
 
         @Override
-        protected Object visitLogicalBinaryExpression(LogicalBinaryExpression node, Object context)
+        protected Object visitLogicalExpression(LogicalExpression node, Object context)
         {
-            Object left = processWithExceptionHandling(node.getLeft(), context);
-            Object right;
+            List<Object> terms = new ArrayList<>();
+            List<Type> types = new ArrayList<>();
 
-            switch (node.getOperator()) {
-                case AND: {
-                    if (Boolean.FALSE.equals(left)) {
-                        return false;
-                    }
+            for (Expression term : node.getTerms()) {
+                Object processed = processWithExceptionHandling(term, context);
 
-                    right = processWithExceptionHandling(node.getRight(), context);
+                switch (node.getOperator()) {
+                    case AND:
+                        if (Boolean.FALSE.equals(processed)) {
+                            return false;
+                        }
 
-                    if (Boolean.FALSE.equals(left) || Boolean.TRUE.equals(right)) {
-                        return left;
-                    }
+                        if (!Boolean.TRUE.equals(processed)) {
+                            terms.add(processed);
+                            types.add(type(term));
+                        }
 
-                    if (Boolean.FALSE.equals(right) || Boolean.TRUE.equals(left)) {
-                        return right;
-                    }
-                    break;
+                        break;
+                    case OR:
+                        if (Boolean.TRUE.equals(processed)) {
+                            return true;
+                        }
+
+                        if (!Boolean.FALSE.equals(processed)) {
+                            terms.add(processed);
+                            types.add(type(term));
+                        }
+                        break;
                 }
-                case OR: {
-                    if (Boolean.TRUE.equals(left)) {
-                        return true;
-                    }
-
-                    right = processWithExceptionHandling(node.getRight(), context);
-
-                    if (Boolean.TRUE.equals(left) || Boolean.FALSE.equals(right)) {
-                        return left;
-                    }
-
-                    if (Boolean.TRUE.equals(right) || Boolean.FALSE.equals(left)) {
-                        return right;
-                    }
-                    break;
-                }
-                default:
-                    throw new IllegalStateException("Unknown LogicalBinaryExpression#Type");
             }
 
-            if (left == null && right == null) {
+            if (terms.isEmpty()) {
+                switch (node.getOperator()) {
+                    case AND:
+                        // terms are true
+                        return true;
+                    case OR:
+                        // all terms are false
+                        return false;
+                }
+            }
+
+            if (terms.size() == 1) {
+                return terms.get(0);
+            }
+
+            if (terms.stream().allMatch(Objects::isNull)) {
                 return null;
             }
 
-            return new LogicalBinaryExpression(node.getOperator(),
-                    toExpression(left, type(node.getLeft())),
-                    toExpression(right, type(node.getRight())));
+            ImmutableList.Builder<Expression> expressions = ImmutableList.builder();
+            for (int i = 0; i < terms.size(); i++) {
+                expressions.add(toExpression(terms.get(i), types.get(i)));
+            }
+            return new LogicalExpression(node.getOperator(), expressions.build());
         }
 
         @Override
@@ -1130,22 +1140,30 @@ public class ExpressionInterpreter
 
             // if pattern is a constant without % or _ replace with a comparison
             if (pattern instanceof Slice && (escape == null || escape instanceof Slice) && !isLikePattern((Slice) pattern, Optional.ofNullable((Slice) escape))) {
-                Slice unescapedPattern = unescapeLiteralLikePattern((Slice) pattern, Optional.ofNullable((Slice) escape));
                 Type valueType = type(node.getValue());
-                Type patternType = createVarcharType(unescapedPattern.length());
-                Type superType = typeCoercion.getCommonSuperType(valueType, patternType)
-                        .orElseThrow(() -> new IllegalArgumentException("Missing super type when optimizing " + node));
-                Expression valueExpression = toExpression(value, valueType);
-                if (!valueType.equals(superType)) {
-                    valueExpression = new Cast(valueExpression, toSqlType(superType), false, typeCoercion.isTypeOnlyCoercion(valueType, superType));
-                }
+                Slice unescapedPattern = unescapeLiteralLikePattern((Slice) pattern, Optional.ofNullable((Slice) escape));
+                VarcharType patternType = createVarcharType(countCodePoints(unescapedPattern));
+
+                Expression valueExpression;
                 Expression patternExpression;
-                if (superType instanceof VarcharType) {
+                if (valueType instanceof CharType) {
+                    if (((CharType) valueType).getLength() != patternType.getBoundedLength()) {
+                        return false;
+                    }
+                    valueExpression = toExpression(value, valueType);
+                    patternExpression = toExpression(trimTrailingSpaces(unescapedPattern), valueType);
+                }
+                else if (valueType instanceof VarcharType) {
+                    Type superType = typeCoercion.getCommonSuperType(valueType, patternType)
+                            .orElseThrow(() -> new IllegalArgumentException("Missing super type when optimizing " + node));
+                    valueExpression = toExpression(value, valueType);
+                    if (!valueType.equals(superType)) {
+                        valueExpression = new Cast(valueExpression, toSqlType(superType), false, typeCoercion.isTypeOnlyCoercion(valueType, superType));
+                    }
                     patternExpression = toExpression(unescapedPattern, superType);
                 }
                 else {
-                    patternExpression = toExpression(unescapedPattern, patternType);
-                    patternExpression = new Cast(patternExpression, toSqlType(superType), false, typeCoercion.isTypeOnlyCoercion(patternType, superType));
+                    throw new IllegalStateException("Unsupported valueType for LIKE: " + valueType);
                 }
                 return new ComparisonExpression(ComparisonExpression.Operator.EQUAL, valueExpression, patternExpression);
             }

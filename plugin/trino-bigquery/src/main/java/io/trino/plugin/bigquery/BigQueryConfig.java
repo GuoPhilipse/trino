@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.util.Optional;
 import java.util.OptionalInt;
 
+import static java.util.concurrent.TimeUnit.HOURS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
 public class BigQueryConfig
@@ -47,6 +48,7 @@ public class BigQueryConfig
     private int maxReadRowsRetries = DEFAULT_MAX_READ_ROWS_RETRIES;
     private boolean caseInsensitiveNameMatching;
     private Duration caseInsensitiveNameMatchingCacheTtl = new Duration(1, MINUTES);
+    private Duration viewsCacheTtl = new Duration(15, MINUTES);
 
     @AssertTrue(message = "Exactly one of 'bigquery.credentials-key' or 'bigquery.credentials-file' must be specified, or the default GoogleCredentials could be created")
     public boolean isCredentialsConfigurationValid()
@@ -146,9 +148,9 @@ public class BigQueryConfig
         return this;
     }
 
-    public int getViewExpirationTimeInHours()
+    public Duration getViewExpiration()
     {
-        return 24;
+        return new Duration(24, HOURS);
     }
 
     public Optional<String> getViewMaterializationProject()
@@ -219,13 +221,18 @@ public class BigQueryConfig
         return this;
     }
 
-    ReadSessionCreatorConfig createReadSessionCreatorConfig()
+    @NotNull
+    @MinDuration("0m")
+    public Duration getViewsCacheTtl()
     {
-        return new ReadSessionCreatorConfig(
-                isViewsEnabled(),
-                getViewMaterializationProject(),
-                getViewMaterializationProject(),
-                getViewExpirationTimeInHours(),
-                getMaxReadRowsRetries());
+        return viewsCacheTtl;
+    }
+
+    @Config("bigquery.views-cache-ttl")
+    @ConfigDescription("Duration for which the materialization of a view will be cached and reused")
+    public BigQueryConfig setViewsCacheTtl(Duration viewsCacheTtl)
+    {
+        this.viewsCacheTtl = viewsCacheTtl;
+        return this;
     }
 }

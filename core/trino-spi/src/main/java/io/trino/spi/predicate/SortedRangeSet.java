@@ -81,7 +81,8 @@ public final class SortedRangeSet
         this.type = type;
         this.equalOperator = TUPLE_DOMAIN_TYPE_OPERATORS.getEqualOperator(type, simpleConvention(NULLABLE_RETURN, BLOCK_POSITION, BLOCK_POSITION));
         this.hashCodeOperator = TUPLE_DOMAIN_TYPE_OPERATORS.getHashCodeOperator(type, simpleConvention(FAIL_ON_NULL, BLOCK_POSITION));
-        this.comparisonOperator = TUPLE_DOMAIN_TYPE_OPERATORS.getComparisonOperator(type, simpleConvention(FAIL_ON_NULL, BLOCK_POSITION, BLOCK_POSITION));
+        // choice of placing unordered values first or last does not matter for this code
+        this.comparisonOperator = TUPLE_DOMAIN_TYPE_OPERATORS.getComparisonUnorderedLastOperator(type, simpleConvention(FAIL_ON_NULL, BLOCK_POSITION, BLOCK_POSITION));
 
         requireNonNull(inclusive, "inclusive is null");
         requireNonNull(sortedRanges, "sortedRanges is null");
@@ -178,7 +179,8 @@ public final class SortedRangeSet
 
     private static SortedRangeSet fromUnorderedValuesBlock(Type type, Block block)
     {
-        MethodHandle comparisonOperator = TUPLE_DOMAIN_TYPE_OPERATORS.getComparisonOperator(type, simpleConvention(FAIL_ON_NULL, BLOCK_POSITION, BLOCK_POSITION));
+        // choice of placing unordered values first or last does not matter for this code
+        MethodHandle comparisonOperator = TUPLE_DOMAIN_TYPE_OPERATORS.getComparisonUnorderedLastOperator(type, simpleConvention(FAIL_ON_NULL, BLOCK_POSITION, BLOCK_POSITION));
 
         List<Integer> indexes = new ArrayList<>(block.getPositionCount());
         for (int position = 0; position < block.getPositionCount(); position++) {
@@ -231,6 +233,14 @@ public final class SortedRangeSet
         rangeList.add(first);
         rangeList.addAll(asList(rest));
         return copyOf(first.getType(), rangeList);
+    }
+
+    static SortedRangeSet of(List<Range> rangeList)
+    {
+        if (rangeList.isEmpty()) {
+            throw new IllegalArgumentException("cannot use empty rangeList");
+        }
+        return copyOf(rangeList.get(0).getType(), rangeList);
     }
 
     private static SortedRangeSet of(Type type, Object value)
@@ -779,7 +789,7 @@ public final class SortedRangeSet
         SortedRangeSet other = (SortedRangeSet) obj;
         return hashCode() == other.hashCode() && // compare hash codes because they are cached, so this is cheap and efficient
                 Objects.equals(this.type, other.type) &&
-                Arrays.equals(inclusive, inclusive) &&
+                Arrays.equals(this.inclusive, other.inclusive) &&
                 blocksEqual(this.sortedRanges, other.sortedRanges);
     }
 
