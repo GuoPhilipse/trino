@@ -18,9 +18,9 @@ import io.trino.Session;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.QualifiedObjectName;
 import io.trino.metadata.QualifiedTablePrefix;
+import io.trino.metadata.ViewInfo;
 import io.trino.security.AccessControl;
 import io.trino.spi.connector.CatalogSchemaTableName;
-import io.trino.spi.connector.ConnectorMaterializedViewDefinition;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.ConnectorTransactionHandle;
@@ -39,7 +39,7 @@ import java.util.Optional;
 import static io.trino.connector.system.jdbc.FilterUtil.tablePrefix;
 import static io.trino.connector.system.jdbc.FilterUtil.tryGetSingleVarcharValue;
 import static io.trino.metadata.MetadataListing.getMaterializedViews;
-import static io.trino.metadata.MetadataListing.listCatalogs;
+import static io.trino.metadata.MetadataListing.listCatalogNames;
 import static io.trino.metadata.MetadataUtil.TableMetadataBuilder.tableMetadataBuilder;
 import static io.trino.spi.connector.SystemTable.Distribution.SINGLE_COORDINATOR;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
@@ -58,7 +58,6 @@ public class MaterializedViewSystemTable
             .column("storage_schema", createUnboundedVarcharType())
             .column("storage_table", createUnboundedVarcharType())
             .column("is_fresh", BOOLEAN)
-            .column("owner", createUnboundedVarcharType())
             .column("comment", createUnboundedVarcharType())
             .column("definition", createUnboundedVarcharType())
             .build();
@@ -98,7 +97,7 @@ public class MaterializedViewSystemTable
         Optional<String> schemaFilter = tryGetSingleVarcharValue(constraint, 1);
         Optional<String> tableFilter = tryGetSingleVarcharValue(constraint, 2);
 
-        listCatalogs(session, metadata, accessControl, catalogFilter).keySet().forEach(catalogName -> {
+        listCatalogNames(session, metadata, accessControl, catalogFilter).forEach(catalogName -> {
             QualifiedTablePrefix tablePrefix = tablePrefix(catalogName, schemaFilter, tableFilter);
 
             getMaterializedViews(session, metadata, accessControl, tablePrefix).forEach((tableName, definition) -> {
@@ -124,7 +123,7 @@ public class MaterializedViewSystemTable
     private static Object[] createMaterializedViewRow(
             QualifiedObjectName name,
             MaterializedViewFreshness freshness,
-            ConnectorMaterializedViewDefinition definition)
+            ViewInfo definition)
     {
         return new Object[] {
                 name.getCatalogName(),
@@ -140,7 +139,6 @@ public class MaterializedViewSystemTable
                         .map(storageTable -> storageTable.getSchemaTableName().getTableName())
                         .orElse(""),
                 freshness.isMaterializedViewFresh(),
-                definition.getOwner(),
                 definition.getComment().orElse(""),
                 definition.getOriginalSql()
         };

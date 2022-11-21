@@ -13,7 +13,7 @@
  */
 package io.trino.operator.aggregation;
 
-import io.trino.metadata.Metadata;
+import io.trino.metadata.TestingFunctionResolution;
 import io.trino.sql.tree.QualifiedName;
 import org.testng.annotations.Test;
 
@@ -21,7 +21,6 @@ import java.util.Collections;
 
 import static io.trino.block.BlockAssertions.createBooleansBlock;
 import static io.trino.block.BlockAssertions.createStringsBlock;
-import static io.trino.metadata.MetadataManager.createTestMetadataManager;
 import static io.trino.operator.aggregation.AggregationTestUtils.assertAggregation;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.VarcharType.VARCHAR;
@@ -29,17 +28,15 @@ import static io.trino.sql.analyzer.TypeSignatureProvider.fromTypes;
 
 public class TestListagg
 {
-    private static final Metadata metadata = createTestMetadataManager();
-    private static final InternalAggregationFunction listagg = metadata.getAggregateFunctionImplementation(
-            metadata.resolveFunction(
-                    QualifiedName.of("listagg"),
-                    fromTypes(VARCHAR, VARCHAR, BOOLEAN, VARCHAR, BOOLEAN)));
+    private static final TestingFunctionResolution FUNCTION_RESOLUTION = new TestingFunctionResolution();
 
     @Test
     public void testEmpty()
     {
         assertAggregation(
-                listagg,
+                FUNCTION_RESOLUTION,
+                QualifiedName.of("listagg"),
+                fromTypes(VARCHAR, VARCHAR, BOOLEAN, VARCHAR, BOOLEAN),
                 null,
                 createStringsBlock(new String[] {null}),
                 createStringsBlock(","),
@@ -52,7 +49,9 @@ public class TestListagg
     public void testOnlyNullValues()
     {
         assertAggregation(
-                listagg,
+                FUNCTION_RESOLUTION,
+                QualifiedName.of("listagg"),
+                fromTypes(VARCHAR, VARCHAR, BOOLEAN, VARCHAR, BOOLEAN),
                 null,
                 createStringsBlock(null, null, null),
                 createStringsBlock(Collections.nCopies(3, ",")),
@@ -65,7 +64,9 @@ public class TestListagg
     public void testOneValue()
     {
         assertAggregation(
-                listagg,
+                FUNCTION_RESOLUTION,
+                QualifiedName.of("listagg"),
+                fromTypes(VARCHAR, VARCHAR, BOOLEAN, VARCHAR, BOOLEAN),
                 "value",
                 createStringsBlock("value"),
                 createStringsBlock(","),
@@ -78,7 +79,9 @@ public class TestListagg
     public void testTwoValues()
     {
         assertAggregation(
-                listagg,
+                FUNCTION_RESOLUTION,
+                QualifiedName.of("listagg"),
+                fromTypes(VARCHAR, VARCHAR, BOOLEAN, VARCHAR, BOOLEAN),
                 "value1,value2",
                 createStringsBlock("value1", "value2"),
                 createStringsBlock(Collections.nCopies(2, ",")),
@@ -91,7 +94,9 @@ public class TestListagg
     public void testTwoValuesMixedWithNullValues()
     {
         assertAggregation(
-                listagg,
+                FUNCTION_RESOLUTION,
+                QualifiedName.of("listagg"),
+                fromTypes(VARCHAR, VARCHAR, BOOLEAN, VARCHAR, BOOLEAN),
                 "value1,value2",
                 createStringsBlock(null, "value1", null, "value2", null),
                 createStringsBlock(Collections.nCopies(5, ",")),
@@ -104,7 +109,9 @@ public class TestListagg
     public void testTwoValuesWithDefaultDelimiter()
     {
         assertAggregation(
-                listagg,
+                FUNCTION_RESOLUTION,
+                QualifiedName.of("listagg"),
+                fromTypes(VARCHAR, VARCHAR, BOOLEAN, VARCHAR, BOOLEAN),
                 "value1value2",
                 createStringsBlock("value1", "value2"),
                 createStringsBlock(Collections.nCopies(2, "")),

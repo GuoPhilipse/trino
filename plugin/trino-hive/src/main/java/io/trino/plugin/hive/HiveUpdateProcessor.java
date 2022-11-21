@@ -164,9 +164,9 @@ public class HiveUpdateProcessor
     }
 
     /**
-     * Return the column UPDATE column handle, which depends on the 3 ACID columns as well as the non-updated columns.
+     * Return the column rowId for UPDATE or MERGED column handle, which depends on the 3 ACID columns as well as the non-updated columns.
      */
-    public static HiveColumnHandle getUpdateRowIdColumnHandle(List<HiveColumnHandle> nonUpdatedColumnHandles)
+    public static HiveColumnHandle getRowIdColumnHandleForNonUpdatedColumns(List<HiveColumnHandle> nonUpdatedColumnHandles)
     {
         List<Field> allAcidFields = new ArrayList<>(ACID_READ_FIELDS);
         if (!nonUpdatedColumnHandles.isEmpty()) {
@@ -208,7 +208,7 @@ public class HiveUpdateProcessor
             Block lastAcidBlock = acidBlock.getField(3);
             checkArgument(lastAcidBlock instanceof RowBlock, "The last block in the acidBlock must be a RowBlock, but instead was %s", lastAcidBlock);
             ColumnarRow nonUpdatedColumnRow = toColumnarRow(lastAcidBlock);
-            ImmutableList.Builder builder = ImmutableList.builder();
+            ImmutableList.Builder<Block> builder = ImmutableList.builder();
             for (int field = 0; field < nonUpdatedColumnRow.getFieldCount(); field++) {
                 builder.add(nonUpdatedColumnRow.getField(field));
             }
@@ -268,7 +268,7 @@ public class HiveUpdateProcessor
                 nonUpdatedIndex++;
             }
         }
-        Map<HiveColumnHandle, Integer> nonUpdatedMap = nonUpdatedNumbersBuilder.build();
+        Map<HiveColumnHandle, Integer> nonUpdatedMap = nonUpdatedNumbersBuilder.buildOrThrow();
         return nonUpdatedColumns.stream().map(nonUpdatedMap::get).collect(toImmutableList());
     }
 }

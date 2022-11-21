@@ -14,12 +14,17 @@
 package io.trino.spi.eventlistener;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import io.trino.spi.Unstable;
 
 import java.util.Objects;
 import java.util.Set;
 
 import static java.util.Objects.requireNonNull;
 
+/**
+ * This class is JSON serializable for convenience and serialization compatibility is not guaranteed across versions.
+ */
 public class OutputColumnMetadata
 {
     private final String columnName;
@@ -27,6 +32,7 @@ public class OutputColumnMetadata
     private final Set<ColumnDetail> sourceColumns;
 
     @JsonCreator
+    @Unstable
     public OutputColumnMetadata(String columnName, String columnType, Set<ColumnDetail> sourceColumns)
     {
         this.columnName = requireNonNull(columnName, "columnName is null");
@@ -34,16 +40,19 @@ public class OutputColumnMetadata
         this.sourceColumns = requireNonNull(sourceColumns, "sourceColumns is null");
     }
 
+    @JsonProperty
     public String getColumnName()
     {
         return columnName;
     }
 
+    @JsonProperty
     public String getColumnType()
     {
         return columnType;
     }
 
+    @JsonProperty
     public Set<ColumnDetail> getSourceColumns()
     {
         return sourceColumns;

@@ -22,6 +22,7 @@ import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.sql.query.QueryAssertions.QueryAssert;
 import io.trino.testing.AbstractTestQueryFramework;
+import io.trino.testing.LocalQueryRunner;
 import io.trino.testing.QueryRunner;
 import org.testng.annotations.Test;
 
@@ -76,7 +77,7 @@ public abstract class BaseQueryAssertionsTest
         Map<String, String> jdbcWithAggregationPushdownDisabledConfigurationProperties = ImmutableMap.<String, String>builder()
                 .putAll(jdbcConfigurationProperties)
                 .put("aggregation-pushdown.enabled", "false")
-                .build();
+                .buildOrThrow();
         queryRunner.createCatalog("jdbc_with_aggregation_pushdown_disabled", "base-jdbc", jdbcWithAggregationPushdownDisabledConfigurationProperties);
     }
 
@@ -92,7 +93,15 @@ public abstract class BaseQueryAssertionsTest
     {
         QueryAssert queryAssert = assertThat(query("SELECT X'001234'"));
         assertThatThrownBy(() -> queryAssert.matches("VALUES '001234'"))
-                .hasMessageContaining("[Output types] expected:<[var[char(6)]]> but was:<[var[binary]]>");
+                .hasMessageContaining("[Output types for query [SELECT X'001234']] expected:<[var[char(6)]]> but was:<[var[binary]]>");
+    }
+
+    @Test
+    public void testWrongTypeWithEmptyResult()
+    {
+        QueryAssert queryAssert = assertThat(query("SELECT X'001234' WHERE false"));
+        assertThatThrownBy(() -> queryAssert.matches("SELECT '001234' WHERE false"))
+                .hasMessageContaining("[Output types for query [SELECT X'001234' WHERE false]] expected:<[var[char(6)]]> but was:<[var[binary]]>");
     }
 
     @Test
@@ -102,11 +111,11 @@ public abstract class BaseQueryAssertionsTest
 
         QueryAssert queryAssert = assertThat(query("VALUES 'foobar'"));
         assertThatThrownBy(queryAssert::returnsEmptyResult)
-                .hasMessage("[rows] \nExpecting empty but was:<[[foobar]]>");
+                .hasMessage("[Rows for query [VALUES 'foobar']] \nExpecting empty but was:<[[foobar]]>");
 
         queryAssert = assertThat(query("VALUES 'foo', 'bar'"));
         assertThatThrownBy(queryAssert::returnsEmptyResult)
-                .hasMessage("[rows] \nExpecting empty but was:<[[foo], [bar]]>");
+                .hasMessage("[Rows for query [VALUES 'foo', 'bar']] \nExpecting empty but was:<[[foo], [bar]]>");
     }
 
     @Test
@@ -134,6 +143,41 @@ public abstract class BaseQueryAssertionsTest
                         "to contain exactly in any order:\n" +
                         "  <[([0, 18, -103])]>" +
                         "\\E).*");
+    }
+
+    @Test
+    public void testNestedVarbinaryResult()
+    {
+        assertThat(query("SELECT CAST(ROW(X'001234') AS ROW(foo varbinary))"))
+                .matches("SELECT CAST(ROW(X'001234') AS ROW(foo varbinary))");
+
+        QueryAssert queryAssert = assertThat(query("SELECT CAST(ROW(X'001234') AS ROW(foo varbinary))"));
+        assertThatThrownBy(() -> queryAssert.matches("SELECT CAST(ROW(X'001299') AS ROW(foo varbinary))"))
+                .hasMessageMatching(
+                        // TODO the representation and thus messages should be the same regardless of query runner in use
+                        getQueryRunner() instanceof LocalQueryRunner
+                                ? "(?s).*" +
+                                "\\Q" +
+                                "Expecting:\n" +
+                                "  <([00 12 34])>\n" +
+                                "to contain exactly in any order:\n" +
+                                "  <[([00 12 99])]>\n" +
+                                "elements not found:\n" +
+                                "  <([00 12 99])>\n" +
+                                "and elements not expected:\n" +
+                                "  <([00 12 34])>" +
+                                "\\E.*"
+                                : "(?s).*" +
+                                "\\Q" +
+                                "Expecting:\n" +
+                                "  <([X'00 12 34'])>\n" +
+                                "to contain exactly in any order:\n" +
+                                "  <[([X'00 12 99'])]>\n" +
+                                "elements not found:\n" +
+                                "  <([X'00 12 99'])>\n" +
+                                "and elements not expected:\n" +
+                                "  <([X'00 12 34'])>" +
+                                "\\E.*");
     }
 
     /**
@@ -242,7 +286,7 @@ public abstract class BaseQueryAssertionsTest
                                 "\n" +
                                 "] but found [\n" +
                                 "\n" +
-                                "Output[name]\n");
+                                "Output[columnNames = [name]]\n");
     }
 
     @Test
@@ -271,7 +315,7 @@ public abstract class BaseQueryAssertionsTest
                                 "\n" +
                                 "] but found [\n" +
                                 "\n" +
-                                "Output[_col0]\n");
+                                "Output[columnNames = [_col0]]\n");
     }
 
     @Test
@@ -291,6 +335,6 @@ public abstract class BaseQueryAssertionsTest
                                 "\n" +
                                 "] but found [\n" +
                                 "\n" +
-                                "Output[name]\n");
+                                "Output[columnNames = [name]]\n");
     }
 }

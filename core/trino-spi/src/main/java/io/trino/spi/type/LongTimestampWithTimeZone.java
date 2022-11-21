@@ -13,13 +13,19 @@
  */
 package io.trino.spi.type;
 
+import org.openjdk.jol.info.ClassLayout;
+
 import java.util.Objects;
+import java.util.StringJoiner;
 
 import static io.trino.spi.type.Timestamps.PICOSECONDS_PER_MILLISECOND;
+import static java.lang.Math.toIntExact;
 
 public final class LongTimestampWithTimeZone
         implements Comparable<LongTimestampWithTimeZone>
 {
+    public static final int INSTANCE_SIZE = toIntExact(ClassLayout.parseClass(LongTimestampWithTimeZone.class).instanceSize());
+
     private final long epochMillis;
     private final int picosOfMilli; // number of picoseconds of the millisecond corresponding to epochMillis
     private final short timeZoneKey;
@@ -99,5 +105,15 @@ public final class LongTimestampWithTimeZone
             return value;
         }
         return Integer.compare(picosOfMilli, other.picosOfMilli);
+    }
+
+    @Override
+    public String toString()
+    {
+        return new StringJoiner(", ", LongTimestampWithTimeZone.class.getSimpleName() + "[", "]")
+                .add("epochMillis=" + epochMillis)
+                .add("picosOfMilli=" + picosOfMilli)
+                .add("timeZoneKey=" + timeZoneKey)
+                .toString();
     }
 }

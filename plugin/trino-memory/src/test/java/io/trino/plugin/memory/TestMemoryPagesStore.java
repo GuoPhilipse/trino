@@ -31,6 +31,8 @@ import java.util.OptionalLong;
 
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.testing.TestingConnectorSession.SESSION;
+import static io.trino.testing.TestingPageSinkId.TESTING_PAGE_SINK_ID;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
@@ -78,12 +80,14 @@ public class TestMemoryPagesStore
         pagesStore.getPages(0L, 0, 1, ImmutableList.of(0), 0, OptionalLong.empty(), OptionalDouble.empty());
     }
 
-    @Test(expectedExceptions = TrinoException.class)
+    @Test
     public void testTryToReadFromEmptyTable()
     {
         createTable(0L, 0L);
         assertEquals(pagesStore.getPages(0L, 0, 1, ImmutableList.of(0), 0, OptionalLong.empty(), OptionalDouble.empty()), ImmutableList.of());
-        pagesStore.getPages(0L, 0, 1, ImmutableList.of(0), 42, OptionalLong.empty(), OptionalDouble.empty());
+        assertThatThrownBy(() -> pagesStore.getPages(0L, 0, 1, ImmutableList.of(0), 42, OptionalLong.empty(), OptionalDouble.empty()))
+                .isInstanceOf(TrinoException.class)
+                .hasMessageMatching("Expected to find.*");
     }
 
     @Test
@@ -110,12 +114,14 @@ public class TestMemoryPagesStore
         assertTrue(pagesStore.contains(2L));
     }
 
-    @Test(expectedExceptions = TrinoException.class)
+    @Test
     public void testMemoryLimitExceeded()
     {
         createTable(0L, 0L);
         insertToTable(0L, createOneMegaBytePage(), 0L);
-        insertToTable(0L, createOneMegaBytePage(), 0L);
+        assertThatThrownBy(() -> insertToTable(0L, createOneMegaBytePage(), 0L))
+                .isInstanceOf(TrinoException.class)
+                .hasMessageMatching("Memory limit.*");
     }
 
     private void insertToTable(long tableId, Long... activeTableIds)
@@ -128,7 +134,8 @@ public class TestMemoryPagesStore
         ConnectorPageSink pageSink = pageSinkProvider.createPageSink(
                 MemoryTransactionHandle.INSTANCE,
                 SESSION,
-                createMemoryInsertTableHandle(tableId, activeTableIds));
+                createMemoryInsertTableHandle(tableId, activeTableIds),
+                TESTING_PAGE_SINK_ID);
         pageSink.appendPage(page);
         pageSink.finish();
     }
@@ -138,7 +145,8 @@ public class TestMemoryPagesStore
         ConnectorPageSink pageSink = pageSinkProvider.createPageSink(
                 MemoryTransactionHandle.INSTANCE,
                 SESSION,
-                createMemoryOutputTableHandle(tableId, activeTableIds));
+                createMemoryOutputTableHandle(tableId, activeTableIds),
+                TESTING_PAGE_SINK_ID);
         pageSink.finish();
     }
 

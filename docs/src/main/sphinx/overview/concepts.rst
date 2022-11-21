@@ -108,8 +108,8 @@ Catalog
 
 A Trino catalog contains schemas and references a data source via a
 connector.  For example, you can configure a JMX catalog to provide
-access to JMX information via the JMX connector. When you run a SQL
-statement in Trino, you are running it against one or more catalogs.
+access to JMX information via the JMX connector. When you run SQL
+statements in Trino, you are running them against one or more catalogs.
 Other examples of catalogs include the Hive catalog to connect to a
 Hive data source.
 
@@ -154,8 +154,8 @@ expressions, and predicates.
 
 Some readers might be curious why this section lists separate concepts
 for statements and queries. This is necessary because, in Trino,
-statements simply refer to the textual representation of a SQL
-statement. When a statement is executed, Trino creates a query along
+statements simply refer to the textual representation of a statement written
+in SQL. When a statement is executed, Trino creates a query along
 with a query plan that is then distributed across a series of Trino
 workers.
 
@@ -176,6 +176,8 @@ that statement. A query encompasses stages, tasks, splits, connectors,
 and other components and data sources working in concert to produce a
 result.
 
+.. _trino-concept-stage:
+
 Stage
 ^^^^^
 
@@ -192,6 +194,8 @@ the output from other stages. Stages are what the coordinator uses to
 model a distributed query plan, but stages themselves don't run on
 Trino workers.
 
+.. _trino-concept-task:
+
 Task
 ^^^^
 
@@ -207,6 +211,8 @@ translated to tasks, which then act upon or process splits. A Trino
 task has inputs and outputs, and just as a stage can be executed in
 parallel by a series of tasks, a task is executing in parallel with a
 series of drivers.
+
+.. _trino-concept-splits:
 
 Split
 ^^^^^

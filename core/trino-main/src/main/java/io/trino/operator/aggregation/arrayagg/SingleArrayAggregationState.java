@@ -15,22 +15,32 @@ package io.trino.operator.aggregation.arrayagg;
 
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
+import io.trino.spi.function.AccumulatorState;
 import io.trino.spi.type.Type;
 import org.openjdk.jol.info.ClassLayout;
 
 import static com.google.common.base.Verify.verify;
+import static io.trino.operator.aggregation.BlockBuilderCopier.copyBlockBuilder;
+import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
 public class SingleArrayAggregationState
         implements ArrayAggregationState
 {
-    private static final int INSTANCE_SIZE = ClassLayout.parseClass(SingleArrayAggregationState.class).instanceSize();
+    private static final int INSTANCE_SIZE = toIntExact(ClassLayout.parseClass(SingleArrayAggregationState.class).instanceSize());
     private BlockBuilder blockBuilder;
     private final Type type;
 
     public SingleArrayAggregationState(Type type)
     {
         this.type = requireNonNull(type, "type is null");
+    }
+
+    // for copying
+    private SingleArrayAggregationState(BlockBuilder blockBuilder, Type type)
+    {
+        this.blockBuilder = blockBuilder;
+        this.type = type;
     }
 
     @Override
@@ -78,5 +88,11 @@ public class SingleArrayAggregationState
     public void reset()
     {
         blockBuilder = null;
+    }
+
+    @Override
+    public AccumulatorState copy()
+    {
+        return new SingleArrayAggregationState(copyBlockBuilder(type, blockBuilder), type);
     }
 }

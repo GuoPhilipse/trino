@@ -29,7 +29,7 @@ import static io.trino.testing.TestingSession.testSessionBuilder;
 import static java.util.Objects.requireNonNull;
 
 public abstract class KafkaQueryRunnerBuilder
-        extends DistributedQueryRunner.Builder
+        extends DistributedQueryRunner.Builder<KafkaQueryRunnerBuilder>
 {
     protected final TestingKafka testingKafka;
     protected Map<String, String> extraKafkaProperties = ImmutableMap.of();
@@ -68,6 +68,7 @@ public abstract class KafkaQueryRunnerBuilder
             testingKafka.start();
             preInit(queryRunner);
             queryRunner.installPlugin(new KafkaPlugin(extension));
+            // note: additional copy via ImmutableList so that if fails on nulls
             Map<String, String> kafkaProperties = new HashMap<>(ImmutableMap.copyOf(extraKafkaProperties));
             kafkaProperties.putIfAbsent("kafka.nodes", testingKafka.getConnectString());
             kafkaProperties.putIfAbsent("kafka.messages-per-split", "1000");

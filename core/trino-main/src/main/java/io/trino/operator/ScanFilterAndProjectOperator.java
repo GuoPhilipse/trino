@@ -30,10 +30,12 @@ import io.trino.operator.WorkProcessorSourceOperatorAdapter.AdapterWorkProcessor
 import io.trino.operator.project.CursorProcessor;
 import io.trino.operator.project.CursorProcessorOutput;
 import io.trino.operator.project.PageProcessor;
+import io.trino.operator.project.PageProcessorMetrics;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorPageSource;
+import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.connector.EmptyPageSource;
 import io.trino.spi.connector.RecordCursor;
@@ -69,6 +71,7 @@ public class ScanFilterAndProjectOperator
         implements WorkProcessorSourceOperator
 {
     private final WorkProcessor<Page> pages;
+    private final PageProcessorMetrics pageProcessorMetrics = new PageProcessorMetrics();
 
     @Nullable
     private RecordCursor cursor;
@@ -110,7 +113,7 @@ public class ScanFilterAndProjectOperator
                         columns,
                         dynamicFilter,
                         types,
-                        requireNonNull(memoryTrackingContext, "memoryTrackingContext is null").aggregateSystemMemoryContext(),
+                        memoryTrackingContext.aggregateUserMemoryContext(),
                         minOutputPageSize,
                         minOutputPageRowCount,
                         avoidPageMaterialization));
@@ -167,6 +170,15 @@ public class ScanFilterAndProjectOperator
     public Metrics getConnectorMetrics()
     {
         return metrics;
+    }
+
+    @Override
+    public Metrics getMetrics()
+    {
+        if (cursor != null) {
+            return Metrics.EMPTY;
+        }
+        return pageProcessorMetrics.getMetrics();
     }
 
     @Override
@@ -234,7 +246,7 @@ public class ScanFilterAndProjectOperator
             this.pageProcessor = requireNonNull(pageProcessor, "pageProcessor is null");
             this.table = requireNonNull(table, "table is null");
             this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
-            this.dynamicFilter = requireNonNull(dynamicFilter, "dynamicFilterSupplier is null");
+            this.dynamicFilter = requireNonNull(dynamicFilter, "dynamicFilter is null");
             this.types = ImmutableList.copyOf(requireNonNull(types, "types is null"));
             this.memoryContext = aggregatedMemoryContext.newLocalMemoryContext(ScanFilterAndProjectOperator.class.getSimpleName());
             this.localAggregatedMemoryContext = newSimpleAggregatedMemoryContext();
@@ -271,10 +283,8 @@ public class ScanFilterAndProjectOperator
                 cursor = ((RecordPageSource) source).getCursor();
                 return ofResult(processColumnSource());
             }
-            else {
-                pageSource = source;
-                return ofResult(processPageSource());
-            }
+            pageSource = source;
+            return ofResult(processPageSource());
         }
 
         WorkProcessor<Page> processColumnSource()
@@ -282,29 +292,31 @@ public class ScanFilterAndProjectOperator
             return WorkProcessor
                     .create(new RecordCursorToPages(session, yieldSignal, cursorProcessor, types, pageSourceMemoryContext, outputMemoryContext))
                     .yielding(yieldSignal::isSet)
-                    .withProcessStateMonitor(state -> memoryContext.setBytes(localAggregatedMemoryContext.getBytes()));
+                    .blocking(() -> memoryContext.setBytes(localAggregatedMemoryContext.getBytes()));
         }
 
         WorkProcessor<Page> processPageSource()
         {
+            ConnectorSession connectorSession = session.toConnectorSession();
             return WorkProcessor
                     .create(new ConnectorPageSourceToPages(pageSourceMemoryContext))
                     .yielding(yieldSignal::isSet)
                     .flatMap(page -> pageProcessor.createWorkProcessor(
-                            session.toConnectorSession(),
+                            connectorSession,
                             yieldSignal,
                             outputMemoryContext,
+                            pageProcessorMetrics,
                             page,
                             avoidPageMaterialization))
                     .transformProcessor(processor -> mergePages(types, minOutputPageSize.toBytes(), minOutputPageRowCount, processor, localAggregatedMemoryContext))
-                    .withProcessStateMonitor(state -> memoryContext.setBytes(localAggregatedMemoryContext.getBytes()));
+                    .blocking(() -> memoryContext.setBytes(localAggregatedMemoryContext.getBytes()));
         }
     }
 
     private class RecordCursorToPages
             implements WorkProcessor.Process<Page>
     {
-        final Session session;
+        final ConnectorSession session;
         final DriverYieldSignal yieldSignal;
         final CursorProcessor cursorProcessor;
         final PageBuilder pageBuilder;
@@ -321,7 +333,7 @@ public class ScanFilterAndProjectOperator
                 LocalMemoryContext pageSourceMemoryContext,
                 LocalMemoryContext outputMemoryContext)
         {
-            this.session = session;
+            this.session = session.toConnectorSession();
             this.yieldSignal = yieldSignal;
             this.cursorProcessor = cursorProcessor;
             this.pageBuilder = new PageBuilder(types);
@@ -333,8 +345,8 @@ public class ScanFilterAndProjectOperator
         public ProcessState<Page> process()
         {
             if (!finished) {
-                CursorProcessorOutput output = cursorProcessor.process(session.toConnectorSession(), yieldSignal, cursor, pageBuilder);
-                pageSourceMemoryContext.setBytes(cursor.getSystemMemoryUsage());
+                CursorProcessorOutput output = cursorProcessor.process(session, yieldSignal, cursor, pageBuilder);
+                pageSourceMemoryContext.setBytes(cursor.getMemoryUsage());
 
                 processedPositions += output.getProcessedRows();
                 // TODO: derive better values for cursors
@@ -354,14 +366,12 @@ public class ScanFilterAndProjectOperator
                 outputMemoryContext.setBytes(pageBuilder.getRetainedSizeInBytes());
                 return ProcessState.ofResult(page);
             }
-            else if (finished) {
+            if (finished) {
                 checkState(pageBuilder.isEmpty());
                 return ProcessState.finished();
             }
-            else {
-                outputMemoryContext.setBytes(pageBuilder.getRetainedSizeInBytes());
-                return ProcessState.yielded();
-            }
+            outputMemoryContext.setBytes(pageBuilder.getRetainedSizeInBytes());
+            return ProcessState.yielded();
         }
     }
 
@@ -388,15 +398,13 @@ public class ScanFilterAndProjectOperator
             }
 
             Page page = pageSource.getNextPage();
-            pageSourceMemoryContext.setBytes(pageSource.getSystemMemoryUsage());
+            pageSourceMemoryContext.setBytes(pageSource.getMemoryUsage());
 
             if (page == null) {
                 if (pageSource.isFinished()) {
                     return ProcessState.finished();
                 }
-                else {
-                    return ProcessState.yielded();
-                }
+                return ProcessState.yielded();
             }
 
             recordMaterializedBytes(page, sizeInBytes -> processedBytes += sizeInBytes);

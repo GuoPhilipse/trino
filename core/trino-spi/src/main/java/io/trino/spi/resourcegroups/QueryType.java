@@ -23,4 +23,6 @@ public enum QueryType
     DELETE,
     ANALYZE,
     DATA_DEFINITION,
+    ALTER_TABLE_EXECUTE,
+    MERGE,
 }

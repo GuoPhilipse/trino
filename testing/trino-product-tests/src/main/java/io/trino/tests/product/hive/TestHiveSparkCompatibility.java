@@ -14,7 +14,6 @@
 package io.trino.tests.product.hive;
 
 import io.trino.tempto.ProductTest;
-import org.assertj.core.api.InstanceOfAssertFactories;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -27,16 +26,16 @@ import static io.trino.tempto.assertions.QueryAssert.Row;
 import static io.trino.tempto.assertions.QueryAssert.Row.row;
 import static io.trino.tempto.assertions.QueryAssert.assertQueryFailure;
 import static io.trino.tempto.assertions.QueryAssert.assertThat;
+import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.tests.product.TestGroups.HIVE_SPARK;
 import static io.trino.tests.product.TestGroups.PROFILE_SPECIFIC_TESTS;
-import static io.trino.tests.product.hive.util.TemporaryHiveTable.randomTableSuffix;
+import static io.trino.tests.product.utils.QueryExecutors.onHive;
 import static io.trino.tests.product.utils.QueryExecutors.onSpark;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
 import static java.lang.String.join;
 import static java.util.Collections.nCopies;
 import static java.util.Locale.ENGLISH;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class TestHiveSparkCompatibility
         extends ProductTest
@@ -47,7 +46,7 @@ public class TestHiveSparkCompatibility
     @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS}, dataProvider = "testReadSparkCreatedTableDataProvider")
     public void testReadSparkCreatedTable(String sparkTableFormat, String expectedTrinoTableFormat)
     {
-        String sparkTableName = "spark_created_table_" + sparkTableFormat.replaceAll("[^a-zA-Z]", "").toLowerCase(ENGLISH) + "_" + randomTableSuffix();
+        String sparkTableName = "spark_created_table_" + sparkTableFormat.replaceAll("[^a-zA-Z]", "").toLowerCase(ENGLISH) + "_" + randomNameSuffix();
         String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
 
         onSpark().executeQuery(
@@ -189,6 +188,98 @@ public class TestHiveSparkCompatibility
         onSpark().executeQuery("DROP TABLE " + sparkTableName);
     }
 
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS}, dataProvider = "sparkParquetTimestampFormats")
+    public void testSparkParquetTimestampCompatibility(String sparkTimestampFormat, String sparkTimestamp, String[] expectedValues)
+    {
+        String sparkTableName = "test_spark_parquet_timestamp_compatibility_" + sparkTimestampFormat.toLowerCase(ENGLISH) + "_" + randomNameSuffix();
+        String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
+
+        onSpark().executeQuery("SET spark.sql.parquet.outputTimestampType = " + sparkTimestampFormat);
+        onSpark().executeQuery(
+                "CREATE TABLE default." + sparkTableName + "(a_timestamp timestamp) " +
+                        "USING PARQUET " +
+                        "TBLPROPERTIES ('transactional'='false')");
+
+        onSpark().executeQuery("INSERT INTO " + sparkTableName + " VALUES (TIMESTAMP '" + sparkTimestamp + "')");
+
+        for (int i = 0; i < HIVE_TIMESTAMP_PRECISIONS.length; i++) {
+            String trinoTimestampPrecision = HIVE_TIMESTAMP_PRECISIONS[i];
+            String expected = expectedValues[i];
+            onTrino().executeQuery("SET SESSION hive.timestamp_precision = '" + trinoTimestampPrecision + "'");
+            assertThat(onTrino().executeQuery("SELECT * FROM " + trinoTableName)).containsOnly(row(java.sql.Timestamp.valueOf(expected)));
+            assertThat(onTrino().executeQuery("SELECT count(*) FROM " + trinoTableName + " WHERE a_timestamp = TIMESTAMP '" + expected + "'")).containsOnly(row(1));
+            assertThat(onTrino().executeQuery("SELECT count(*) FROM " + trinoTableName + " WHERE a_timestamp != TIMESTAMP '" + expected + "'")).containsOnly(row(0));
+        }
+
+        onSpark().executeQuery("DROP TABLE " + sparkTableName);
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testInsertFailsOnBucketedTableCreatedBySpark()
+    {
+        String hiveTableName = "spark_insert_bucketed_table_" + randomNameSuffix();
+
+        onSpark().executeQuery(
+                "CREATE TABLE default." + hiveTableName + "(a_key integer, a_value integer) " +
+                        "USING PARQUET " +
+                        "CLUSTERED BY (a_key) INTO 3 BUCKETS");
+
+        assertQueryFailure(() -> onTrino().executeQuery("INSERT INTO default." + hiveTableName + " VALUES (1, 100)"))
+                .hasMessageContaining("Inserting into Spark bucketed tables is not supported");
+
+        onSpark().executeQuery("DROP TABLE " + hiveTableName);
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testUpdateFailsOnBucketedTableCreatedBySpark()
+    {
+        String hiveTableName = "spark_update_bucketed_table_" + randomNameSuffix();
+
+        onSpark().executeQuery(
+                "CREATE TABLE default." + hiveTableName + "(a_key integer, a_value integer) " +
+                        "USING ORC " +
+                        "CLUSTERED BY (a_key) INTO 3 BUCKETS");
+
+        assertQueryFailure(() -> onTrino().executeQuery("UPDATE default." + hiveTableName + " SET a_value = 100 WHERE a_key = 1"))
+                .hasMessageContaining("Updating Spark bucketed tables is not supported");
+
+        onSpark().executeQuery("DROP TABLE " + hiveTableName);
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testDeleteFailsOnBucketedTableCreatedBySpark()
+    {
+        String hiveTableName = "spark_delete_bucketed_table_" + randomNameSuffix();
+
+        onSpark().executeQuery(
+                "CREATE TABLE default." + hiveTableName + "(a_key integer, a_value integer) " +
+                        "USING ORC " +
+                        "CLUSTERED BY (a_key) INTO 3 BUCKETS");
+
+        assertQueryFailure(() -> onTrino().executeQuery("DELETE FROM default." + hiveTableName + " WHERE a_key = 1"))
+                .hasMessageContaining("Deleting from Spark bucketed tables is not supported");
+
+        onSpark().executeQuery("DROP TABLE " + hiveTableName);
+    }
+
+    private static final String[] HIVE_TIMESTAMP_PRECISIONS = new String[]{"MILLISECONDS", "MICROSECONDS", "NANOSECONDS"};
+
+    @DataProvider
+    public static Object[][] sparkParquetTimestampFormats()
+    {
+        String millisTimestamp = "2005-09-10 13:00:00.123";
+        String microsTimestamp = "2005-09-10 13:00:00.123456";
+        String nanosTimestamp = "2005-09-10 13:00:00.123456789";
+
+        // Ordering of expected values matches the ordering in HIVE_TIMESTAMP_PRECISIONS
+        return new Object[][] {
+                {"TIMESTAMP_MILLIS", millisTimestamp, new String[]{millisTimestamp, millisTimestamp, millisTimestamp}},
+                {"TIMESTAMP_MICROS", microsTimestamp, new String[]{millisTimestamp, microsTimestamp, microsTimestamp}},
+                // note that Spark timestamp has microsecond precision
+                {"INT96", nanosTimestamp, new String[]{millisTimestamp, microsTimestamp, microsTimestamp}},
+        };
+    }
+
     @DataProvider
     public static Object[][] testReadSparkCreatedTableDataProvider()
     {
@@ -214,17 +305,13 @@ public class TestHiveSparkCompatibility
     @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
     public void testReadTrinoCreatedParquetTableWithNativeWriter()
     {
-        onTrino().executeQuery("SET SESSION " + TRINO_CATALOG + ".experimental_parquet_optimized_writer_enabled = true");
-        // TODO (https://github.com/trinodb/trino/issues/6377) Native Parquet Writer writes Parquet V2 files that are not compatible with Spark's vectorized reader, see https://github.com/trinodb/trino/issues/7953 for more details
-        assertThatThrownBy(() -> testReadTrinoCreatedTable("using_native_parquet", "PARQUET"))
-                .hasStackTraceContaining("at org.apache.hive.jdbc.HiveStatement.execute")
-                .extracting(Throwable::toString, InstanceOfAssertFactories.STRING)
-                .matches("\\Qio.trino.tempto.query.QueryExecutionException: java.sql.SQLException: Error running query: java.lang.UnsupportedOperationException: Unsupported encoding: RLE\\E");
+        onTrino().executeQuery("SET SESSION " + TRINO_CATALOG + ".parquet_optimized_writer_enabled = true");
+        testReadTrinoCreatedTable("using_native_parquet", "PARQUET");
     }
 
     private void testReadTrinoCreatedTable(String tableName, String tableFormat)
     {
-        String sparkTableName = "trino_created_table_" + tableName + "_" + randomTableSuffix();
+        String sparkTableName = "trino_created_table_" + tableName + "_" + randomNameSuffix();
         String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
 
         // Spark timestamps are in microsecond precision
@@ -338,11 +425,107 @@ public class TestHiveSparkCompatibility
     }
 
     @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testReadSparkdDateAndTimePartitionName()
+    {
+        String sparkTableName = "test_trino_reading_spark_date_and_time_type_partitioned_" + randomNameSuffix();
+        String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
+
+        onSpark().executeQuery(format("CREATE TABLE default.%s (value integer) PARTITIONED BY (dt date)", sparkTableName));
+
+        // Spark allows creating partition with time unit
+        // Hive denies creating such partitions, but allows reading
+        onSpark().executeQuery(format("INSERT INTO %s PARTITION(dt='2022-04-13 00:00:00.000000000') VALUES (1)", sparkTableName));
+        onSpark().executeQuery(format("INSERT INTO %s PARTITION(dt='2022-04-13 00:00:00') VALUES (2)", sparkTableName));
+        onSpark().executeQuery(format("INSERT INTO %s PARTITION(dt='2022-04-13 00:00') VALUES (3)", sparkTableName));
+        onSpark().executeQuery(format("INSERT INTO %s PARTITION(dt='12345-06-07') VALUES (4)", sparkTableName));
+        onSpark().executeQuery(format("INSERT INTO %s PARTITION(dt='123-04-05') VALUES (5)", sparkTableName));
+        onSpark().executeQuery(format("INSERT INTO %s PARTITION(dt='-0001-01-01') VALUES (6)", sparkTableName));
+
+        assertThat(onTrino().executeQuery("SELECT \"$partition\" FROM " + trinoTableName))
+                .containsOnly(List.of(
+                        row("dt=2022-04-13 00%3A00%3A00.000000000"),
+                        row("dt=2022-04-13 00%3A00%3A00"),
+                        row("dt=2022-04-13 00%3A00"),
+                        row("dt=12345-06-07"),
+                        row("dt=123-04-05"),
+                        row("dt=-0001-01-01")));
+
+        // Use date_format function to avoid exception due to java.sql.Date.valueOf() with 5 digit year
+        assertThat(onSpark().executeQuery("SELECT value, date_format(dt, 'yyyy-MM-dd') FROM " + sparkTableName))
+                .containsOnly(List.of(
+                        row(1, "2022-04-13"),
+                        row(2, "2022-04-13"),
+                        row(3, "2022-04-13"),
+                        row(4, "+12345-06-07"),
+                        row(5, null),
+                        row(6, "-0001-01-01")));
+
+        // Use date_format function to avoid exception due to java.sql.Date.valueOf() with 5 digit year
+        assertThat(onHive().executeQuery("SELECT value, date_format(dt, 'yyyy-MM-dd') FROM " + sparkTableName))
+                .containsOnly(List.of(
+                        row(1, "2022-04-13"),
+                        row(2, "2022-04-13"),
+                        row(3, "2022-04-13"),
+                        row(4, "12345-06-07"),
+                        row(5, "0123-04-06"),
+                        row(6, "0002-01-03")));
+
+        // Cast to varchar so that we can compare with Spark & Hive easily
+        assertThat(onTrino().executeQuery("SELECT value, CAST(dt AS VARCHAR) FROM " + trinoTableName))
+                .containsOnly(List.of(
+                        row(1, "2022-04-13"),
+                        row(2, "2022-04-13"),
+                        row(3, "2022-04-13"),
+                        row(4, "12345-06-07"),
+                        row(5, "0123-04-05"),
+                        row(6, "-0001-01-01")));
+
+        onTrino().executeQuery("DROP TABLE " + trinoTableName);
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS}, dataProvider = "unsupportedPartitionDates")
+    public void testReadSparkInvalidDatePartitionName(String inputDate, java.sql.Date outputDate)
+    {
+        String sparkTableName = "test_trino_reading_spark_invalid_date_type_partitioned_" + randomNameSuffix();
+        String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
+
+        onSpark().executeQuery(format("CREATE TABLE default.%s (value integer) PARTITIONED BY (dt date)", sparkTableName));
+
+        // Spark allows creating partition with invalid date format
+        // Hive denies creating such partitions, but allows reading
+        onSpark().executeQuery(format("INSERT INTO %s PARTITION(dt='%s') VALUES (1)", sparkTableName, inputDate));
+
+        // Hive ignores time unit, and return null for invalid dates
+        assertThat(onHive().executeQuery("SELECT value, dt FROM " + sparkTableName))
+                .containsOnly(List.of(row(1, outputDate)));
+
+        // Trino throws an exception if the date is invalid format or not a whole round date
+        assertQueryFailure(() -> onTrino().executeQuery("SELECT value, dt FROM " + trinoTableName))
+                .hasMessageContaining("Invalid partition value");
+
+        onTrino().executeQuery("DROP TABLE " + trinoTableName);
+    }
+
+    @DataProvider
+    public static Object[][] unsupportedPartitionDates()
+    {
+        return new Object[][] {
+                {"1965-09-10 23:59:59.999999999", java.sql.Date.valueOf(LocalDate.of(1965, 9, 10))},
+                {"1965-09-10 23:59:59", java.sql.Date.valueOf(LocalDate.of(1965, 9, 10))},
+                {"1965-09-10 23:59", java.sql.Date.valueOf(LocalDate.of(1965, 9, 10))},
+                {"1965-09-10 00", java.sql.Date.valueOf(LocalDate.of(1965, 9, 10))},
+                {"2021-02-30", java.sql.Date.valueOf(LocalDate.of(2021, 3, 2))},
+                {"1965-09-10 invalid", java.sql.Date.valueOf(LocalDate.of(1965, 9, 10))},
+                {"invalid date", null},
+        };
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
     public void testReadSparkBucketedTable()
     {
         // Spark tables can be created using native Spark code or by going through Hive code
         // This tests the native Spark path.
-        String sparkTableName = "test_trino_reading_spark_native_buckets_" + randomTableSuffix();
+        String sparkTableName = "test_trino_reading_spark_native_buckets_" + randomNameSuffix();
         String trinoTableName = format("%s.default.%s", TRINO_CATALOG, sparkTableName);
 
         onSpark().executeQuery(format(

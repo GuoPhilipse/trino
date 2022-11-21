@@ -13,7 +13,10 @@
  */
 package io.trino.spi.eventlistener;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.trino.spi.TrinoWarning;
+import io.trino.spi.Unstable;
 
 import java.time.Instant;
 import java.util.List;
@@ -22,6 +25,9 @@ import java.util.StringJoiner;
 
 import static java.util.Objects.requireNonNull;
 
+/**
+ * This class is JSON serializable for convenience and serialization compatibility is not guaranteed across versions.
+ */
 public class QueryCompletedEvent
 {
     private final QueryMetadata metadata;
@@ -35,6 +41,8 @@ public class QueryCompletedEvent
     private final Instant executionStartTime;
     private final Instant endTime;
 
+    @JsonCreator
+    @Unstable
     public QueryCompletedEvent(
             QueryMetadata metadata,
             QueryStatistics statistics,
@@ -57,46 +65,55 @@ public class QueryCompletedEvent
         this.endTime = requireNonNull(endTime, "endTime is null");
     }
 
+    @JsonProperty
     public QueryMetadata getMetadata()
     {
         return metadata;
     }
 
+    @JsonProperty
     public QueryStatistics getStatistics()
     {
         return statistics;
     }
 
+    @JsonProperty
     public QueryContext getContext()
     {
         return context;
     }
 
+    @JsonProperty
     public QueryIOMetadata getIoMetadata()
     {
         return ioMetadata;
     }
 
+    @JsonProperty
     public Optional<QueryFailureInfo> getFailureInfo()
     {
         return failureInfo;
     }
 
+    @JsonProperty
     public List<TrinoWarning> getWarnings()
     {
         return warnings;
     }
 
+    @JsonProperty
     public Instant getCreateTime()
     {
         return createTime;
     }
 
+    @JsonProperty
     public Instant getExecutionStartTime()
     {
         return executionStartTime;
     }
 
+    @JsonProperty
     public Instant getEndTime()
     {
         return endTime;

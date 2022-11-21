@@ -13,13 +13,12 @@
  */
 package io.trino.operator.aggregation.state;
 
-import io.airlift.slice.Slice;
 import io.trino.array.LongBigArray;
+import io.trino.spi.function.AccumulatorState;
 import io.trino.spi.function.AccumulatorStateFactory;
 import org.openjdk.jol.info.ClassLayout;
 
-import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
-import static io.trino.spi.type.UnscaledDecimal128Arithmetic.UNSCALED_DECIMAL_128_SLICE_LENGTH;
+import static java.lang.Math.toIntExact;
 
 public class LongDecimalWithOverflowAndLongStateFactory
         implements AccumulatorStateFactory<LongDecimalWithOverflowAndLongState>
@@ -31,28 +30,16 @@ public class LongDecimalWithOverflowAndLongStateFactory
     }
 
     @Override
-    public Class<? extends LongDecimalWithOverflowAndLongState> getSingleStateClass()
-    {
-        return SingleLongDecimalWithOverflowAndLongState.class;
-    }
-
-    @Override
     public LongDecimalWithOverflowAndLongState createGroupedState()
     {
         return new GroupedLongDecimalWithOverflowAndLongState();
-    }
-
-    @Override
-    public Class<? extends LongDecimalWithOverflowAndLongState> getGroupedStateClass()
-    {
-        return GroupedLongDecimalWithOverflowAndLongState.class;
     }
 
     public static class GroupedLongDecimalWithOverflowAndLongState
             extends LongDecimalWithOverflowStateFactory.GroupedLongDecimalWithOverflowState
             implements LongDecimalWithOverflowAndLongState
     {
-        private static final int INSTANCE_SIZE = ClassLayout.parseClass(GroupedLongDecimalWithOverflowAndLongState.class).instanceSize();
+        private static final int INSTANCE_SIZE = toIntExact(ClassLayout.parseClass(GroupedLongDecimalWithOverflowAndLongState.class).instanceSize());
         private final LongBigArray longs = new LongBigArray();
 
         @Override
@@ -83,7 +70,7 @@ public class LongDecimalWithOverflowAndLongStateFactory
         @Override
         public long getEstimatedSize()
         {
-            return INSTANCE_SIZE + unscaledDecimals.sizeOf() + (numberOfElements * SingleLongDecimalWithOverflowAndLongState.SIZE) + (overflows == null ? 0 : overflows.sizeOf());
+            return INSTANCE_SIZE + isNotNull.sizeOf() + unscaledDecimals.sizeOf() + (overflows == null ? 0 : overflows.sizeOf());
         }
     }
 
@@ -91,9 +78,17 @@ public class LongDecimalWithOverflowAndLongStateFactory
             extends LongDecimalWithOverflowStateFactory.SingleLongDecimalWithOverflowState
             implements LongDecimalWithOverflowAndLongState
     {
-        public static final int SIZE = ClassLayout.parseClass(Slice.class).instanceSize() + UNSCALED_DECIMAL_128_SLICE_LENGTH + SIZE_OF_LONG * 2;
+        private static final int INSTANCE_SIZE = toIntExact(ClassLayout.parseClass(SingleLongDecimalWithOverflowAndLongState.class).instanceSize());
 
         protected long longValue;
+
+        public SingleLongDecimalWithOverflowAndLongState() {}
+
+        // for copying
+        private SingleLongDecimalWithOverflowAndLongState(long longValue)
+        {
+            this.longValue = longValue;
+        }
 
         @Override
         public long getLong()
@@ -116,10 +111,13 @@ public class LongDecimalWithOverflowAndLongStateFactory
         @Override
         public long getEstimatedSize()
         {
-            if (getLongDecimal() == null) {
-                return SIZE_OF_LONG;
-            }
-            return SIZE;
+            return INSTANCE_SIZE + SIZE;
+        }
+
+        @Override
+        public AccumulatorState copy()
+        {
+            return new SingleLongDecimalWithOverflowAndLongState(longValue);
         }
     }
 }

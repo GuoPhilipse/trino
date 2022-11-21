@@ -27,9 +27,9 @@ import io.trino.plugin.raptor.legacy.systemtables.TableStatsSystemTable;
 import io.trino.spi.NodeManager;
 import io.trino.spi.connector.SystemTable;
 import io.trino.spi.type.TypeManager;
-import org.skife.jdbi.v2.DBI;
-import org.skife.jdbi.v2.IDBI;
-import org.skife.jdbi.v2.tweak.ConnectionFactory;
+import org.jdbi.v3.core.ConnectionFactory;
+import org.jdbi.v3.core.Jdbi;
+import org.jdbi.v3.sqlobject.SqlObjectPlugin;
 
 import javax.inject.Singleton;
 
@@ -47,7 +47,6 @@ public class RaptorModule
         binder.bind(RaptorSplitManager.class).in(Scopes.SINGLETON);
         binder.bind(RaptorPageSourceProvider.class).in(Scopes.SINGLETON);
         binder.bind(RaptorPageSinkProvider.class).in(Scopes.SINGLETON);
-        binder.bind(RaptorHandleResolver.class).in(Scopes.SINGLETON);
         binder.bind(RaptorNodePartitioningProvider.class).in(Scopes.SINGLETON);
         binder.bind(RaptorSessionProperties.class).in(Scopes.SINGLETON);
         binder.bind(RaptorTableProperties.class).in(Scopes.SINGLETON);
@@ -61,11 +60,12 @@ public class RaptorModule
     @ForMetadata
     @Singleton
     @Provides
-    public IDBI createDBI(@ForMetadata ConnectionFactory connectionFactory, TypeManager typeManager)
+    public static Jdbi createJdbi(@ForMetadata ConnectionFactory connectionFactory, TypeManager typeManager)
     {
-        DBI dbi = new DBI(connectionFactory);
-        dbi.registerMapper(new TableColumn.Mapper(typeManager));
-        dbi.registerMapper(new Distribution.Mapper(typeManager));
+        Jdbi dbi = Jdbi.create(connectionFactory)
+                .installPlugin(new SqlObjectPlugin())
+                .registerRowMapper(new TableColumn.Mapper(typeManager))
+                .registerRowMapper(new Distribution.Mapper(typeManager));
         createTablesWithRetry(dbi);
         return dbi;
     }

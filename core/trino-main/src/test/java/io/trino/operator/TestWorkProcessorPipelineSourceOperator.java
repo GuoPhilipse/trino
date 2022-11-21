@@ -20,12 +20,12 @@ import com.google.common.util.concurrent.SettableFuture;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
 import io.trino.Session;
-import io.trino.connector.CatalogName;
 import io.trino.memory.context.MemoryTrackingContext;
 import io.trino.metadata.Split;
 import io.trino.operator.WorkProcessor.Transformation;
 import io.trino.operator.WorkProcessor.TransformationState;
 import io.trino.operator.WorkProcessorAssertion.Transform;
+import io.trino.plugin.base.metrics.DurationTiming;
 import io.trino.plugin.base.metrics.LongCount;
 import io.trino.spi.Page;
 import io.trino.spi.connector.UpdatablePageSource;
@@ -45,12 +45,13 @@ import java.util.function.Supplier;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.RowPagesBuilder.rowPagesBuilder;
 import static io.trino.SessionTestUtils.TEST_SESSION;
-import static io.trino.execution.Lifespan.taskWide;
 import static io.trino.operator.WorkProcessorAssertion.transformationFrom;
 import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.testing.TestingHandles.TEST_CATALOG_HANDLE;
 import static io.trino.testing.TestingSplit.createLocalSplit;
 import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNull;
@@ -203,13 +204,21 @@ public class TestWorkProcessorPipelineSourceOperator
         assertEquals(operatorStats.get(2).getOutputPositions(), 5);
         assertEquals(operatorStats.get(2).getOutputDataSize().toBytes(), 45);
 
-        assertEquals(operatorStats.get(1).getMetrics().getMetrics(), ImmutableMap.of("testOperatorMetric", new LongCount(1)));
+        assertThat(operatorStats.get(1).getMetrics().getMetrics())
+                .hasSize(5)
+                .containsEntry("testOperatorMetric", new LongCount(1));
 
         // assert source operator stats are correct
         OperatorStats sourceOperatorStats = operatorStats.get(0);
 
-        assertEquals(sourceOperatorStats.getMetrics().getMetrics(), ImmutableMap.of("testSourceMetric", new LongCount(1)));
-        assertEquals(sourceOperatorStats.getConnectorMetrics().getMetrics(), ImmutableMap.of("testSourceConnectorMetric", new LongCount(2)));
+        assertThat(sourceOperatorStats.getMetrics().getMetrics())
+                .hasSize(6)
+                .containsEntry("testSourceMetric", new LongCount(1))
+                .containsEntry("testSourceClosed", new LongCount(1));
+        assertEquals(sourceOperatorStats.getConnectorMetrics().getMetrics(), ImmutableMap.of(
+                "testSourceConnectorMetric", new LongCount(2),
+                "testSourceConnectorClosed", new LongCount(1),
+                "Physical input read time", new DurationTiming(new Duration(7, NANOSECONDS))));
 
         assertEquals(sourceOperatorStats.getDynamicFilterSplitsProcessed(), 42L);
 
@@ -222,7 +231,7 @@ public class TestWorkProcessorPipelineSourceOperator
         assertEquals(sourceOperatorStats.getInputDataSize(), DataSize.ofBytes(5));
         assertEquals(sourceOperatorStats.getInputPositions(), 6);
 
-        assertEquals(sourceOperatorStats.getAddInputWall(), new Duration(7, NANOSECONDS));
+        assertEquals(sourceOperatorStats.getAddInputWall(), new Duration(0, NANOSECONDS));
 
         // pipeline input stats should match source WorkProcessorOperator stats
         PipelineStats pipelineStats = pipelineOperator.getOperatorContext().getDriverContext().getPipelineContext().getPipelineStats();
@@ -235,13 +244,22 @@ public class TestWorkProcessorPipelineSourceOperator
         assertEquals(sourceOperatorStats.getInputDataSize(), pipelineStats.getProcessedInputDataSize());
         assertEquals(sourceOperatorStats.getInputPositions(), pipelineStats.getProcessedInputPositions());
 
-        assertEquals(sourceOperatorStats.getAddInputWall(), pipelineStats.getPhysicalInputReadTime());
+        assertThat(sourceOperatorStats.getPhysicalInputReadTime().convertToMostSuccinctTimeUnit())
+                .isEqualTo(pipelineStats.getPhysicalInputReadTime().convertToMostSuccinctTimeUnit());
 
         // assert pipeline metrics
         List<OperatorStats> operatorSummaries = pipelineStats.getOperatorSummaries();
-        assertEquals(operatorSummaries.get(0).getMetrics().getMetrics(), ImmutableMap.of("testSourceMetric", new LongCount(1)));
-        assertEquals(operatorSummaries.get(0).getConnectorMetrics().getMetrics(), ImmutableMap.of("testSourceConnectorMetric", new LongCount(2)));
-        assertEquals(operatorSummaries.get(1).getMetrics().getMetrics(), ImmutableMap.of("testOperatorMetric", new LongCount(1)));
+        assertThat(operatorSummaries.get(0).getMetrics().getMetrics())
+                .hasSize(6)
+                .containsEntry("testSourceMetric", new LongCount(1))
+                .containsEntry("testSourceClosed", new LongCount(1));
+        assertEquals(operatorSummaries.get(0).getConnectorMetrics().getMetrics(), ImmutableMap.of(
+                "testSourceConnectorMetric", new LongCount(2),
+                "testSourceConnectorClosed", new LongCount(1),
+                "Physical input read time", new DurationTiming(new Duration(7, NANOSECONDS))));
+        assertThat(operatorSummaries.get(1).getMetrics().getMetrics())
+                .hasSize(5)
+                .containsEntry("testOperatorMetric", new LongCount(1));
     }
 
     @Test
@@ -279,9 +297,8 @@ public class TestWorkProcessorPipelineSourceOperator
     private Split createSplit()
     {
         return new Split(
-                new CatalogName("catalog_name"),
-                createLocalSplit(),
-                taskWide());
+                TEST_CATALOG_HANDLE,
+                createLocalSplit());
     }
 
     private Page createPage(int pageNumber)
@@ -425,13 +442,17 @@ public class TestWorkProcessorPipelineSourceOperator
         @Override
         public Metrics getMetrics()
         {
-            return new Metrics(ImmutableMap.of("testSourceMetric", new LongCount(1)));
+            return new Metrics(ImmutableMap.of(
+                    "testSourceMetric", new LongCount(1),
+                    "testSourceClosed", new LongCount(closed ? 1 : 0)));
         }
 
         @Override
         public Metrics getConnectorMetrics()
         {
-            return new Metrics(ImmutableMap.of("testSourceConnectorMetric", new LongCount(2)));
+            return new Metrics(ImmutableMap.of(
+                    "testSourceConnectorMetric", new LongCount(2),
+                    "testSourceConnectorClosed", new LongCount(closed ? 1 : 0)));
         }
 
         @Override

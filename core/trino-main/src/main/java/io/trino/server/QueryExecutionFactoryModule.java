@@ -30,6 +30,7 @@ import io.trino.execution.CreateViewTask;
 import io.trino.execution.DataDefinitionExecution.DataDefinitionExecutionFactory;
 import io.trino.execution.DataDefinitionTask;
 import io.trino.execution.DeallocateTask;
+import io.trino.execution.DenyTask;
 import io.trino.execution.DropColumnTask;
 import io.trino.execution.DropMaterializedViewTask;
 import io.trino.execution.DropRoleTask;
@@ -50,6 +51,7 @@ import io.trino.execution.RevokeRolesTask;
 import io.trino.execution.RevokeTask;
 import io.trino.execution.RollbackTask;
 import io.trino.execution.SetPathTask;
+import io.trino.execution.SetPropertiesTask;
 import io.trino.execution.SetRoleTask;
 import io.trino.execution.SetSchemaAuthorizationTask;
 import io.trino.execution.SetSessionTask;
@@ -58,6 +60,7 @@ import io.trino.execution.SetTimeZoneTask;
 import io.trino.execution.SetViewAuthorizationTask;
 import io.trino.execution.SqlQueryExecution.SqlQueryExecutionFactory;
 import io.trino.execution.StartTransactionTask;
+import io.trino.execution.TruncateTableTask;
 import io.trino.execution.UseTask;
 import io.trino.sql.tree.AddColumn;
 import io.trino.sql.tree.Call;
@@ -69,6 +72,7 @@ import io.trino.sql.tree.CreateSchema;
 import io.trino.sql.tree.CreateTable;
 import io.trino.sql.tree.CreateView;
 import io.trino.sql.tree.Deallocate;
+import io.trino.sql.tree.Deny;
 import io.trino.sql.tree.DropColumn;
 import io.trino.sql.tree.DropMaterializedView;
 import io.trino.sql.tree.DropRole;
@@ -88,6 +92,7 @@ import io.trino.sql.tree.Revoke;
 import io.trino.sql.tree.RevokeRoles;
 import io.trino.sql.tree.Rollback;
 import io.trino.sql.tree.SetPath;
+import io.trino.sql.tree.SetProperties;
 import io.trino.sql.tree.SetRole;
 import io.trino.sql.tree.SetSchemaAuthorization;
 import io.trino.sql.tree.SetSession;
@@ -96,6 +101,7 @@ import io.trino.sql.tree.SetTimeZone;
 import io.trino.sql.tree.SetViewAuthorization;
 import io.trino.sql.tree.StartTransaction;
 import io.trino.sql.tree.Statement;
+import io.trino.sql.tree.TruncateTable;
 import io.trino.sql.tree.Use;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -109,7 +115,8 @@ public class QueryExecutionFactoryModule
     @Override
     public void configure(Binder binder)
     {
-        var executionBinder = newMapBinder(binder, new TypeLiteral<Class<? extends Statement>>() {}, new TypeLiteral<QueryExecutionFactory<?>>() {});
+        MapBinder<Class<? extends Statement>, QueryExecutionFactory<?>> executionBinder =
+                newMapBinder(binder, new TypeLiteral<Class<? extends Statement>>() {}, new TypeLiteral<QueryExecutionFactory<?>>() {});
 
         binder.bind(SqlQueryExecutionFactory.class).in(Scopes.SINGLETON);
         for (Class<? extends Statement> statement : getNonDataDefinitionStatements()) {
@@ -126,11 +133,13 @@ public class QueryExecutionFactoryModule
         bindDataDefinitionTask(binder, executionBinder, CreateTable.class, CreateTableTask.class);
         bindDataDefinitionTask(binder, executionBinder, CreateView.class, CreateViewTask.class);
         bindDataDefinitionTask(binder, executionBinder, Deallocate.class, DeallocateTask.class);
+        bindDataDefinitionTask(binder, executionBinder, Deny.class, DenyTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropColumn.class, DropColumnTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropRole.class, DropRoleTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropSchema.class, DropSchemaTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropTable.class, DropTableTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropView.class, DropViewTask.class);
+        bindDataDefinitionTask(binder, executionBinder, TruncateTable.class, TruncateTableTask.class);
         bindDataDefinitionTask(binder, executionBinder, CreateMaterializedView.class, CreateMaterializedViewTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropMaterializedView.class, DropMaterializedViewTask.class);
         bindDataDefinitionTask(binder, executionBinder, Grant.class, GrantTask.class);
@@ -146,6 +155,7 @@ public class QueryExecutionFactoryModule
         bindDataDefinitionTask(binder, executionBinder, RevokeRoles.class, RevokeRolesTask.class);
         bindDataDefinitionTask(binder, executionBinder, Rollback.class, RollbackTask.class);
         bindDataDefinitionTask(binder, executionBinder, SetPath.class, SetPathTask.class);
+        bindDataDefinitionTask(binder, executionBinder, SetProperties.class, SetPropertiesTask.class);
         bindDataDefinitionTask(binder, executionBinder, SetTimeZone.class, SetTimeZoneTask.class);
         bindDataDefinitionTask(binder, executionBinder, SetRole.class, SetRoleTask.class);
         bindDataDefinitionTask(binder, executionBinder, SetSchemaAuthorization.class, SetSchemaAuthorizationTask.class);
@@ -163,7 +173,8 @@ public class QueryExecutionFactoryModule
             Class<? extends DataDefinitionTask<T>> task)
     {
         checkArgument(isDataDefinitionStatement(statement));
-        var taskBinder = newMapBinder(binder, new TypeLiteral<Class<? extends Statement>>() {}, new TypeLiteral<DataDefinitionTask<?>>() {});
+        MapBinder<Class<? extends Statement>, DataDefinitionTask<?>> taskBinder =
+                newMapBinder(binder, new TypeLiteral<Class<? extends Statement>>() {}, new TypeLiteral<DataDefinitionTask<?>>() {});
         taskBinder.addBinding(statement).to(task).in(Scopes.SINGLETON);
         executionBinder.addBinding(statement).to(DataDefinitionExecutionFactory.class).in(Scopes.SINGLETON);
     }

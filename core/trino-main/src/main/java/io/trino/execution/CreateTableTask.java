@@ -19,13 +19,14 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.trino.Session;
-import io.trino.connector.CatalogName;
+import io.trino.connector.CatalogHandle;
 import io.trino.execution.warnings.WarningCollector;
-import io.trino.metadata.Metadata;
+import io.trino.metadata.ColumnPropertyManager;
 import io.trino.metadata.QualifiedObjectName;
 import io.trino.metadata.RedirectionAwareTableHandle;
 import io.trino.metadata.TableHandle;
 import io.trino.metadata.TableMetadata;
+import io.trino.metadata.TablePropertyManager;
 import io.trino.security.AccessControl;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnMetadata;
@@ -33,6 +34,7 @@ import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.security.AccessDeniedException;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeNotFoundException;
+import io.trino.sql.PlannerContext;
 import io.trino.sql.analyzer.Output;
 import io.trino.sql.analyzer.OutputColumn;
 import io.trino.sql.tree.ColumnDefinition;
@@ -42,7 +44,8 @@ import io.trino.sql.tree.LikeClause;
 import io.trino.sql.tree.NodeRef;
 import io.trino.sql.tree.Parameter;
 import io.trino.sql.tree.TableElement;
-import io.trino.transaction.TransactionManager;
+
+import javax.inject.Inject;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -57,6 +60,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.util.concurrent.Futures.immediateVoidFuture;
+import static io.trino.execution.ParameterExtractor.bindParameters;
 import static io.trino.metadata.MetadataUtil.createQualifiedObjectName;
 import static io.trino.metadata.MetadataUtil.getRequiredCatalogHandle;
 import static io.trino.spi.StandardErrorCode.ALREADY_EXISTS;
@@ -68,19 +72,36 @@ import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.StandardErrorCode.TABLE_ALREADY_EXISTS;
 import static io.trino.spi.StandardErrorCode.TABLE_NOT_FOUND;
 import static io.trino.spi.StandardErrorCode.TYPE_NOT_FOUND;
+import static io.trino.spi.StandardErrorCode.UNSUPPORTED_TABLE_TYPE;
 import static io.trino.spi.connector.ConnectorCapabilities.NOT_NULL_COLUMN_CONSTRAINT;
-import static io.trino.sql.NodeUtils.mapFromProperties;
-import static io.trino.sql.ParameterUtils.parameterExtractor;
 import static io.trino.sql.analyzer.SemanticExceptions.semanticException;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toTypeSignature;
 import static io.trino.sql.tree.LikeClause.PropertiesOption.EXCLUDING;
 import static io.trino.sql.tree.LikeClause.PropertiesOption.INCLUDING;
 import static io.trino.type.UnknownType.UNKNOWN;
-import static java.lang.String.format;
+import static java.util.Objects.requireNonNull;
 
 public class CreateTableTask
         implements DataDefinitionTask<CreateTable>
 {
+    private final PlannerContext plannerContext;
+    private final AccessControl accessControl;
+    private final ColumnPropertyManager columnPropertyManager;
+    private final TablePropertyManager tablePropertyManager;
+
+    @Inject
+    public CreateTableTask(
+            PlannerContext plannerContext,
+            AccessControl accessControl,
+            ColumnPropertyManager columnPropertyManager,
+            TablePropertyManager tablePropertyManager)
+    {
+        this.plannerContext = requireNonNull(plannerContext, "plannerContext is null");
+        this.accessControl = requireNonNull(accessControl, "accessControl is null");
+        this.columnPropertyManager = requireNonNull(columnPropertyManager, "columnPropertyManager is null");
+        this.tablePropertyManager = requireNonNull(tablePropertyManager, "tablePropertyManager is null");
+    }
+
     @Override
     public String getName()
     {
@@ -88,32 +109,32 @@ public class CreateTableTask
     }
 
     @Override
-    public String explain(CreateTable statement, List<Expression> parameters)
-    {
-        return "CREATE TABLE " + statement.getName();
-    }
-
-    @Override
     public ListenableFuture<Void> execute(
             CreateTable statement,
-            TransactionManager transactionManager,
-            Metadata metadata,
-            AccessControl accessControl,
             QueryStateMachine stateMachine,
             List<Expression> parameters,
             WarningCollector warningCollector)
     {
-        return internalExecute(statement, metadata, accessControl, stateMachine.getSession(), parameters, output -> stateMachine.setOutput(Optional.of(output)));
+        return internalExecute(statement, stateMachine.getSession(), parameters, output -> stateMachine.setOutput(Optional.of(output)));
     }
 
     @VisibleForTesting
-    ListenableFuture<Void> internalExecute(CreateTable statement, Metadata metadata, AccessControl accessControl, Session session, List<Expression> parameters, Consumer<Output> outputConsumer)
+    ListenableFuture<Void> internalExecute(CreateTable statement, Session session, List<Expression> parameters, Consumer<Output> outputConsumer)
     {
         checkArgument(!statement.getElements().isEmpty(), "no columns for table");
 
-        Map<NodeRef<Parameter>, Expression> parameterLookup = parameterExtractor(statement, parameters);
+        Map<NodeRef<Parameter>, Expression> parameterLookup = bindParameters(statement, parameters);
         QualifiedObjectName tableName = createQualifiedObjectName(session, statement, statement.getName());
-        Optional<TableHandle> tableHandle = metadata.getTableHandle(session, tableName);
+        Optional<TableHandle> tableHandle;
+        try {
+            tableHandle = plannerContext.getMetadata().getTableHandle(session, tableName);
+        }
+        catch (TrinoException e) {
+            if (e.getErrorCode().equals(UNSUPPORTED_TABLE_TYPE.toErrorCode())) {
+                throw semanticException(TABLE_ALREADY_EXISTS, statement, "Table '%s' of unsupported type already exists", tableName);
+            }
+            throw e;
+        }
         if (tableHandle.isPresent()) {
             if (!statement.isNotExists()) {
                 throw semanticException(TABLE_ALREADY_EXISTS, statement, "Table '%s' already exists", tableName);
@@ -121,7 +142,8 @@ public class CreateTableTask
             return immediateVoidFuture();
         }
 
-        CatalogName catalogName = getRequiredCatalogHandle(metadata, session, statement, tableName.getCatalogName());
+        String catalogName = tableName.getCatalogName();
+        CatalogHandle catalogHandle = getRequiredCatalogHandle(plannerContext.getMetadata(), session, statement, catalogName);
 
         LinkedHashMap<String, ColumnMetadata> columns = new LinkedHashMap<>();
         Map<String, Object> inheritedProperties = ImmutableMap.of();
@@ -132,7 +154,7 @@ public class CreateTableTask
                 String name = column.getName().getValue().toLowerCase(Locale.ENGLISH);
                 Type type;
                 try {
-                    type = metadata.getType(toTypeSignature(column.getType()));
+                    type = plannerContext.getTypeManager().getType(toTypeSignature(column.getType()));
                 }
                 catch (TypeNotFoundException e) {
                     throw semanticException(TYPE_NOT_FOUND, element, "Unknown type '%s' for column '%s'", column.getType(), column.getName());
@@ -143,19 +165,18 @@ public class CreateTableTask
                 if (columns.containsKey(name)) {
                     throw semanticException(DUPLICATE_COLUMN_NAME, column, "Column name '%s' specified more than once", column.getName());
                 }
-                if (!column.isNullable() && !metadata.getConnectorCapabilities(session, catalogName).contains(NOT_NULL_COLUMN_CONSTRAINT)) {
-                    throw semanticException(NOT_SUPPORTED, column, "Catalog '%s' does not support non-null column for column name '%s'", catalogName.getCatalogName(), column.getName());
+                if (!column.isNullable() && !plannerContext.getMetadata().getConnectorCapabilities(session, catalogHandle).contains(NOT_NULL_COLUMN_CONSTRAINT)) {
+                    throw semanticException(NOT_SUPPORTED, column, "Catalog '%s' does not support non-null column for column name '%s'", catalogName, column.getName());
                 }
-
-                Map<String, Expression> sqlProperties = mapFromProperties(column.getProperties());
-                Map<String, Object> columnProperties = metadata.getColumnPropertyManager().getProperties(
+                Map<String, Object> columnProperties = columnPropertyManager.getProperties(
                         catalogName,
-                        tableName.getCatalogName(),
-                        sqlProperties,
+                        catalogHandle,
+                        column.getProperties(),
                         session,
-                        metadata,
+                        plannerContext,
                         accessControl,
-                        parameterLookup);
+                        parameterLookup,
+                        true);
 
                 columns.put(name, ColumnMetadata.builder()
                         .setName(name)
@@ -168,27 +189,34 @@ public class CreateTableTask
             else if (element instanceof LikeClause) {
                 LikeClause likeClause = (LikeClause) element;
                 QualifiedObjectName originalLikeTableName = createQualifiedObjectName(session, statement, likeClause.getTableName());
-                if (metadata.getCatalogHandle(session, originalLikeTableName.getCatalogName()).isEmpty()) {
+                if (plannerContext.getMetadata().getCatalogHandle(session, originalLikeTableName.getCatalogName()).isEmpty()) {
                     throw semanticException(CATALOG_NOT_FOUND, statement, "LIKE table catalog '%s' does not exist", originalLikeTableName.getCatalogName());
                 }
 
-                RedirectionAwareTableHandle redirection = metadata.getRedirectionAwareTableHandle(session, originalLikeTableName);
+                RedirectionAwareTableHandle redirection = plannerContext.getMetadata().getRedirectionAwareTableHandle(session, originalLikeTableName);
                 TableHandle likeTable = redirection.getTableHandle()
                         .orElseThrow(() -> semanticException(TABLE_NOT_FOUND, statement, "LIKE table '%s' does not exist", originalLikeTableName));
 
+                LikeClause.PropertiesOption propertiesOption = likeClause.getPropertiesOption().orElse(EXCLUDING);
                 QualifiedObjectName likeTableName = redirection.getRedirectedTableName().orElse(originalLikeTableName);
-                if (!tableName.getCatalogName().equals(likeTableName.getCatalogName())) {
-                    String message = "CREATE TABLE LIKE across catalogs is not supported";
+                if (propertiesOption == INCLUDING && !catalogName.equals(likeTableName.getCatalogName())) {
                     if (!originalLikeTableName.equals(likeTableName)) {
-                        message += format(". LIKE table '%s' redirected to '%s'.", originalLikeTableName, likeTableName);
+                        throw semanticException(
+                                NOT_SUPPORTED,
+                                statement,
+                                "CREATE TABLE LIKE table INCLUDING PROPERTIES across catalogs is not supported. LIKE table '%s' redirected to '%s'.",
+                                originalLikeTableName,
+                                likeTableName);
                     }
-                    throw semanticException(NOT_SUPPORTED, statement, message);
+                    throw semanticException(
+                            NOT_SUPPORTED,
+                            statement,
+                            "CREATE TABLE LIKE table INCLUDING PROPERTIES across catalogs is not supported");
                 }
 
-                TableMetadata likeTableMetadata = metadata.getTableMetadata(session, likeTable);
+                TableMetadata likeTableMetadata = plannerContext.getMetadata().getTableMetadata(session, likeTable);
 
-                Optional<LikeClause.PropertiesOption> propertiesOption = likeClause.getPropertiesOption();
-                if (propertiesOption.isPresent() && propertiesOption.get() == LikeClause.PropertiesOption.INCLUDING) {
+                if (propertiesOption == INCLUDING) {
                     if (includingProperties) {
                         throw semanticException(NOT_SUPPORTED, statement, "Only one LIKE clause can specify INCLUDING PROPERTIES");
                     }
@@ -205,14 +233,14 @@ public class CreateTableTask
                                     .collect(toImmutableSet()));
                 }
                 catch (AccessDeniedException e) {
-                    throw new AccessDeniedException("Cannot reference columns of table " + likeTableName);
+                    throw new AccessDeniedException("Cannot reference columns of table " + likeTableName, e);
                 }
-                if (propertiesOption.orElse(EXCLUDING) == INCLUDING) {
+                if (propertiesOption == INCLUDING) {
                     try {
                         accessControl.checkCanShowCreateTable(session.toSecurityContext(), likeTableName);
                     }
                     catch (AccessDeniedException e) {
-                        throw new AccessDeniedException("Cannot reference properties of table " + likeTableName);
+                        throw new AccessDeniedException("Cannot reference properties of table " + likeTableName, e);
                     }
                 }
 
@@ -229,24 +257,26 @@ public class CreateTableTask
                 throw new TrinoException(GENERIC_INTERNAL_ERROR, "Invalid TableElement: " + element.getClass().getName());
             }
         }
-
-        accessControl.checkCanCreateTable(session.toSecurityContext(), tableName);
-
-        Map<String, Expression> sqlProperties = mapFromProperties(statement.getProperties());
-        Map<String, Object> properties = metadata.getTablePropertyManager().getProperties(
+        Map<String, Object> properties = tablePropertyManager.getProperties(
                 catalogName,
-                tableName.getCatalogName(),
-                sqlProperties,
+                catalogHandle,
+                statement.getProperties(),
                 session,
-                metadata,
+                plannerContext,
                 accessControl,
-                parameterLookup);
+                parameterLookup,
+                true);
 
-        Map<String, Object> finalProperties = combineProperties(sqlProperties.keySet(), properties, inheritedProperties);
+        accessControl.checkCanCreateTable(session.toSecurityContext(), tableName, properties);
+
+        Set<String> specifiedPropertyKeys = statement.getProperties().stream()
+                .map(property -> property.getName().getValue())
+                .collect(toImmutableSet());
+        Map<String, Object> finalProperties = combineProperties(specifiedPropertyKeys, properties, inheritedProperties);
 
         ConnectorTableMetadata tableMetadata = new ConnectorTableMetadata(tableName.asSchemaTableName(), ImmutableList.copyOf(columns.values()), finalProperties, statement.getComment());
         try {
-            metadata.createTable(session, tableName.getCatalogName(), tableMetadata, statement.isNotExists());
+            plannerContext.getMetadata().createTable(session, catalogName, tableMetadata, statement.isNotExists());
         }
         catch (TrinoException e) {
             // connectors are not required to handle the ignoreExisting flag
@@ -255,7 +285,7 @@ public class CreateTableTask
             }
         }
         outputConsumer.accept(new Output(
-                tableName.getCatalogName(),
+                catalogName,
                 tableName.getSchemaName(),
                 tableName.getObjectName(),
                 Optional.of(tableMetadata.getColumns().stream()

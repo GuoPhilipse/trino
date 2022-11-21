@@ -14,70 +14,66 @@
 package io.trino.plugin.iceberg;
 
 import com.google.common.collect.ImmutableMap;
-import io.trino.testing.BaseConnectorSmokeTest;
+import io.trino.plugin.hive.metastore.HiveMetastore;
 import io.trino.testing.QueryRunner;
-import io.trino.testing.TestingConnectorBehavior;
-import org.testng.annotations.Test;
+import org.testng.annotations.AfterClass;
 
-import static io.trino.plugin.iceberg.IcebergQueryRunner.createIcebergQueryRunner;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+
+import static com.google.common.io.MoreFiles.deleteRecursively;
+import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
+import static io.trino.plugin.hive.metastore.file.FileHiveMetastore.createTestingFileHiveMetastore;
+import static org.apache.iceberg.FileFormat.ORC;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 // Redundant over TestIcebergOrcConnectorTest, but exists to exercise BaseConnectorSmokeTest
 // Some features like materialized views may be supported by Iceberg only.
 public class TestIcebergConnectorSmokeTest
-        extends BaseConnectorSmokeTest
+        extends BaseIcebergConnectorSmokeTest
 {
+    private HiveMetastore metastore;
+    private File metastoreDir;
+
+    public TestIcebergConnectorSmokeTest()
+    {
+        super(ORC);
+    }
+
     @Override
     protected QueryRunner createQueryRunner()
             throws Exception
     {
-        return createIcebergQueryRunner(ImmutableMap.of(), ImmutableMap.of(), REQUIRED_TPCH_TABLES);
+        this.metastoreDir = Files.createTempDirectory("test_iceberg_table_smoke_test").toFile();
+        this.metastoreDir.deleteOnExit();
+        this.metastore = createTestingFileHiveMetastore(metastoreDir);
+        return IcebergQueryRunner.builder()
+                .setInitialTables(REQUIRED_TPCH_TABLES)
+                .setMetastoreDirectory(metastoreDir)
+                .setIcebergProperties(ImmutableMap.of("iceberg.register-table-procedure.enabled", "true"))
+                .build();
+    }
+
+    @AfterClass(alwaysRun = true)
+    public void tearDown()
+            throws IOException
+    {
+        deleteRecursively(metastoreDir.toPath(), ALLOW_INSECURE);
     }
 
     @Override
-    protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior)
+    protected void dropTableFromMetastore(String tableName)
     {
-        switch (connectorBehavior) {
-            case SUPPORTS_COMMENT_ON_COLUMN:
-            case SUPPORTS_TOPN_PUSHDOWN:
-                return false;
-
-            case SUPPORTS_CREATE_VIEW:
-                return true;
-
-            case SUPPORTS_CREATE_MATERIALIZED_VIEW:
-                return true;
-
-            case SUPPORTS_DELETE:
-                return true;
-            default:
-                return super.hasBehavior(connectorBehavior);
-        }
+        metastore.dropTable(getSession().getSchema().orElseThrow(), tableName, false);
+        assertThat(metastore.getTable(getSession().getSchema().orElseThrow(), tableName)).as("Table in metastore should be dropped").isEmpty();
     }
 
-    @Test
     @Override
-    public void testRowLevelDelete()
+    protected String getMetadataLocation(String tableName)
     {
-        // Deletes are covered AbstractTestIcebergConnectorTest
-        assertThatThrownBy(super::testRowLevelDelete)
-                .hasStackTraceContaining("This connector only supports delete where one or more identity-transformed partitions are deleted entirely");
-    }
-
-    @Test
-    @Override
-    public void testShowCreateTable()
-    {
-        assertThat((String) computeScalar("SHOW CREATE TABLE region"))
-                .isEqualTo("" +
-                        "CREATE TABLE iceberg.tpch.region (\n" +
-                        "   regionkey bigint,\n" +
-                        "   name varchar,\n" +
-                        "   comment varchar\n" +
-                        ")\n" +
-                        "WITH (\n" +
-                        "   format = 'ORC'\n" +
-                        ")");
+        return metastore
+                .getTable(getSession().getSchema().orElseThrow(), tableName).orElseThrow()
+                .getParameters().get("metadata_location");
     }
 }

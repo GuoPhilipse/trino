@@ -59,12 +59,12 @@ public interface ConnectorPageSource
     Page getNextPage();
 
     /**
-     * Get the total memory that needs to be reserved in the general memory pool.
+     * Get the total memory that needs to be reserved in the memory pool.
      * This memory should include any buffers, etc. that are used for reading data.
      *
      * @return the memory used so far in table read
      */
-    long getSystemMemoryUsage();
+    long getMemoryUsage();
 
     /**
      * Immediately finishes this page source.  Trino will always call this method.
@@ -87,6 +87,7 @@ public interface ConnectorPageSource
      * Returns the connector's metrics, mapping a metric ID to its latest value.
      * Each call must return an immutable snapshot of available metrics.
      * Same ID metrics are merged across all tasks and exposed via OperatorStats.
+     * This method can be called after the page source is closed.
      */
     default Metrics getMetrics()
     {

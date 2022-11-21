@@ -13,7 +13,9 @@
  */
 package io.trino.spi.eventlistener;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.trino.spi.Unstable;
 
 import java.net.URI;
 import java.util.List;
@@ -21,6 +23,9 @@ import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
 
+/**
+ * This class is JSON serializable for convenience and serialization compatibility is not guaranteed across versions.
+ */
 public class QueryMetadata
 {
     private final String queryId;
@@ -37,9 +42,12 @@ public class QueryMetadata
     private final List<RoutineInfo> routines;
 
     private final Optional<String> plan;
+    private final Optional<String> jsonPlan;
 
     private final Optional<String> payload;
 
+    @JsonCreator
+    @Unstable
     public QueryMetadata(
             String queryId,
             Optional<String> transactionId,
@@ -51,6 +59,7 @@ public class QueryMetadata
             List<RoutineInfo> routines,
             URI uri,
             Optional<String> plan,
+            Optional<String> jsonPlan,
             Optional<String> payload)
     {
         this.queryId = requireNonNull(queryId, "queryId is null");
@@ -63,6 +72,7 @@ public class QueryMetadata
         this.routines = requireNonNull(routines, "routines is null");
         this.uri = requireNonNull(uri, "uri is null");
         this.plan = requireNonNull(plan, "plan is null");
+        this.jsonPlan = requireNonNull(jsonPlan, "jsonPlan is null");
         this.payload = requireNonNull(payload, "payload is null");
     }
 
@@ -124,6 +134,12 @@ public class QueryMetadata
     public Optional<String> getPlan()
     {
         return plan;
+    }
+
+    @JsonProperty
+    public Optional<String> getJsonPlan()
+    {
+        return jsonPlan;
     }
 
     @JsonProperty

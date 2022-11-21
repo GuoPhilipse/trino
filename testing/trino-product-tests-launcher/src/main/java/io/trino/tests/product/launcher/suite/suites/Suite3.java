@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableList;
 import io.trino.tests.product.launcher.env.EnvironmentConfig;
 import io.trino.tests.product.launcher.env.environment.EnvMultinodeTls;
 import io.trino.tests.product.launcher.env.environment.EnvMultinodeTlsKerberos;
+import io.trino.tests.product.launcher.env.environment.EnvMultinodeTlsKerberosDelegation;
 import io.trino.tests.product.launcher.env.environment.EnvSinglenodeKerberosHdfsImpersonationWithDataProtection;
 import io.trino.tests.product.launcher.env.environment.EnvSinglenodeKerberosHdfsImpersonationWithWireEncryption;
 import io.trino.tests.product.launcher.suite.Suite;
@@ -34,16 +35,21 @@ public class Suite3
     {
         return ImmutableList.of(
                 testOnEnvironment(EnvMultinodeTls.class)
-                        .withGroups("smoke", "cli", "group-by", "join", "tls")
+                        .withGroups("configured_features", "smoke", "cli", "group-by", "join", "tls")
+                        .withExcludedGroups("azure")
                         .build(),
                 testOnEnvironment(EnvMultinodeTlsKerberos.class)
-                        .withGroups("cli", "group-by", "join", "tls")
+                        .withGroups("configured_features", "cli", "group-by", "join", "tls")
                         .build(),
                 testOnEnvironment(EnvSinglenodeKerberosHdfsImpersonationWithWireEncryption.class)
-                        .withGroups("storage_formats", "cli", "hdfs_impersonation", "authorization")
+                        .withGroups("configured_features", "storage_formats", "cli", "hdfs_impersonation", "authorization")
                         .build(),
                 testOnEnvironment(EnvSinglenodeKerberosHdfsImpersonationWithDataProtection.class)
+                        .withGroups("configured_features")
                         .withTests("TestHiveStorageFormats.testOrcTableCreatedInTrino", "TestHiveCreateTable.testCreateTable")
+                        .build(),
+                testOnEnvironment(EnvMultinodeTlsKerberosDelegation.class)
+                        .withGroups("configured_features", "jdbc")
                         .build());
     }
 }

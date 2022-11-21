@@ -13,10 +13,8 @@
  */
 package io.trino.plugin.sqlserver;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.log.Logger;
-import io.airlift.log.Logging;
 import io.trino.Session;
 import io.trino.plugin.tpch.TpchPlugin;
 import io.trino.spi.security.Identity;
@@ -26,6 +24,7 @@ import io.trino.tpch.TpchTable;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static io.airlift.testing.Closeables.closeAllSuppress;
 import static io.trino.plugin.tpch.TpchMetadata.TINY_SCHEMA_NAME;
@@ -34,9 +33,11 @@ import static io.trino.testing.TestingSession.testSessionBuilder;
 
 public final class SqlServerQueryRunner
 {
+    private static final Logger log = Logger.get(SqlServerQueryRunner.class);
+
     private SqlServerQueryRunner() {}
 
-    private static final String CATALOG = "sqlserver";
+    public static final String CATALOG = "sqlserver";
 
     private static final String TEST_SCHEMA = "dbo";
 
@@ -47,21 +48,36 @@ public final class SqlServerQueryRunner
             Iterable<TpchTable<?>> tables)
             throws Exception
     {
+        return createSqlServerQueryRunner(testingSqlServer, extraProperties, Map.of(), connectorProperties, tables, runner -> {});
+    }
+
+    public static QueryRunner createSqlServerQueryRunner(
+            TestingSqlServer testingSqlServer,
+            Map<String, String> extraProperties,
+            Map<String, String> coordinatorProperties,
+            Map<String, String> connectorProperties,
+            Iterable<TpchTable<?>> tables,
+            Consumer<QueryRunner> moreSetup)
+            throws Exception
+    {
         DistributedQueryRunner queryRunner = DistributedQueryRunner.builder(createSession(testingSqlServer.getUsername()))
                 .setExtraProperties(extraProperties)
+                .setCoordinatorProperties(coordinatorProperties)
+                .setAdditionalSetup(moreSetup)
                 .build();
         try {
             queryRunner.installPlugin(new TpchPlugin());
             queryRunner.createCatalog("tpch", "tpch");
 
+            // note: additional copy via ImmutableList so that if fails on nulls
             connectorProperties = new HashMap<>(ImmutableMap.copyOf(connectorProperties));
             connectorProperties.putIfAbsent("connection-url", testingSqlServer.getJdbcUrl());
             connectorProperties.putIfAbsent("connection-user", testingSqlServer.getUsername());
             connectorProperties.putIfAbsent("connection-password", testingSqlServer.getPassword());
-            connectorProperties.putIfAbsent("allow-drop-table", "true");
 
             queryRunner.installPlugin(new SqlServerPlugin());
             queryRunner.createCatalog(CATALOG, "sqlserver", connectorProperties);
+            log.info("%s catalog properties: %s", CATALOG, connectorProperties);
 
             copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(testingSqlServer.getUsername()), tables);
 
@@ -85,8 +101,6 @@ public final class SqlServerQueryRunner
     public static void main(String[] args)
             throws Exception
     {
-        Logging.initialize();
-
         TestingSqlServer testingSqlServer = new TestingSqlServer();
 
         // SqlServer is using docker container so in case that shutdown hook is not called, developer can easily clean docker container on their own
@@ -96,7 +110,7 @@ public final class SqlServerQueryRunner
                 testingSqlServer,
                 ImmutableMap.of("http-server.http.port", "8080"),
                 ImmutableMap.of(),
-                ImmutableList.of());
+                TpchTable.getTables());
 
         Logger log = Logger.get(SqlServerQueryRunner.class);
         log.info("======== SERVER STARTED ========");

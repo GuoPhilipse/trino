@@ -13,60 +13,55 @@
  */
 package io.trino.execution.buffer;
 
-import io.airlift.compress.Compressor;
-import io.airlift.compress.Decompressor;
-import io.airlift.compress.lz4.Lz4Compressor;
-import io.airlift.compress.lz4.Lz4Decompressor;
+import io.airlift.slice.Slice;
+import io.trino.metadata.BlockEncodingManager;
+import io.trino.metadata.InternalBlockEncodingSerde;
 import io.trino.spi.Page;
 import io.trino.spi.block.BlockEncodingSerde;
-import io.trino.spiller.SpillCipher;
+
+import javax.crypto.SecretKey;
 
 import java.util.Optional;
 
-import static io.trino.metadata.MetadataManager.createTestMetadataManager;
+import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 
 public class TestingPagesSerdeFactory
         extends PagesSerdeFactory
 {
+    private static final InternalBlockEncodingSerde BLOCK_ENCODING_SERDE = new InternalBlockEncodingSerde(new BlockEncodingManager(), TESTING_TYPE_MANAGER);
+
     public TestingPagesSerdeFactory()
     {
         // compression should be enabled in as many tests as possible
-        super(createTestMetadataManager().getBlockEncodingSerde(), true);
+        super(BLOCK_ENCODING_SERDE, true);
     }
 
     public static PagesSerde testingPagesSerde()
     {
         return new SynchronizedPagesSerde(
-                createTestMetadataManager().getBlockEncodingSerde(),
-                Optional.of(new Lz4Compressor()),
-                Optional.of(new Lz4Decompressor()),
+                BLOCK_ENCODING_SERDE,
+                true,
                 Optional.empty());
     }
 
     private static class SynchronizedPagesSerde
             extends PagesSerde
     {
-        public SynchronizedPagesSerde(BlockEncodingSerde blockEncodingSerde, Optional<Compressor> compressor, Optional<Decompressor> decompressor, Optional<SpillCipher> spillCipher)
+        public SynchronizedPagesSerde(BlockEncodingSerde blockEncodingSerde, boolean compressionEnabled, Optional<SecretKey> encryptionKey)
         {
-            super(blockEncodingSerde, compressor, decompressor, spillCipher);
+            super(blockEncodingSerde, compressionEnabled, encryptionKey);
         }
 
         @Override
-        public synchronized SerializedPage serialize(PagesSerdeContext context, Page page)
+        public synchronized Slice serialize(Page page)
         {
-            return super.serialize(context, page);
+            return super.serialize(page);
         }
 
         @Override
-        public synchronized Page deserialize(SerializedPage serializedPage)
+        public synchronized Page deserialize(Slice page)
         {
-            return super.deserialize(serializedPage);
-        }
-
-        @Override
-        public synchronized Page deserialize(PagesSerdeContext context, SerializedPage page)
-        {
-            return super.deserialize(context, page);
+            return super.deserialize(page);
         }
     }
 }

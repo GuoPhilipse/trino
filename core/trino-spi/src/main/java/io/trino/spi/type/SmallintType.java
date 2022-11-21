@@ -24,6 +24,8 @@ import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.function.ScalarOperator;
 
 import java.util.Optional;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 import static io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static io.trino.spi.function.OperatorType.COMPARISON_UNORDERED_LAST;
@@ -117,6 +119,34 @@ public final class SmallintType
     }
 
     @Override
+    public Optional<Object> getPreviousValue(Object object)
+    {
+        long value = (long) object;
+        checkValueValid(value);
+        if (value == Short.MIN_VALUE) {
+            return Optional.empty();
+        }
+        return Optional.of(value - 1);
+    }
+
+    @Override
+    public Optional<Object> getNextValue(Object object)
+    {
+        long value = (long) object;
+        checkValueValid(value);
+        if (value == Short.MAX_VALUE) {
+            return Optional.empty();
+        }
+        return Optional.of(value + 1);
+    }
+
+    @Override
+    public Optional<Stream<?>> getDiscreteValues(Range range)
+    {
+        return Optional.of(LongStream.rangeClosed((long) range.getMin(), (long) range.getMax()).boxed());
+    }
+
+    @Override
     public void appendTo(Block block, int position, BlockBuilder blockBuilder)
     {
         if (block.isNull(position)) {
@@ -130,11 +160,17 @@ public final class SmallintType
     @Override
     public long getLong(Block block, int position)
     {
-        return (long) block.getShort(position, 0);
+        return block.getShort(position, 0);
     }
 
     @Override
     public void writeLong(BlockBuilder blockBuilder, long value)
+    {
+        checkValueValid(value);
+        blockBuilder.writeShort((int) value).closeEntry();
+    }
+
+    private void checkValueValid(long value)
     {
         if (value > Short.MAX_VALUE) {
             throw new TrinoException(GENERIC_INTERNAL_ERROR, format("Value %d exceeds MAX_SHORT", value));
@@ -142,8 +178,6 @@ public final class SmallintType
         if (value < Short.MIN_VALUE) {
             throw new TrinoException(GENERIC_INTERNAL_ERROR, format("Value %d is less than MIN_SHORT", value));
         }
-
-        blockBuilder.writeShort((int) value).closeEntry();
     }
 
     @Override

@@ -16,11 +16,10 @@ package io.trino.tests.product.launcher.suite.suites;
 import com.google.common.collect.ImmutableList;
 import io.trino.tests.product.launcher.env.EnvironmentConfig;
 import io.trino.tests.product.launcher.env.EnvironmentDefaults;
+import io.trino.tests.product.launcher.env.environment.EnvMultinodeKerberosKudu;
 import io.trino.tests.product.launcher.env.environment.EnvSinglenodeKerberosHdfsImpersonationCrossRealm;
-import io.trino.tests.product.launcher.env.environment.EnvSinglenodeMysql;
 import io.trino.tests.product.launcher.env.environment.EnvSinglenodePostgresql;
 import io.trino.tests.product.launcher.env.environment.EnvSinglenodeSparkHive;
-import io.trino.tests.product.launcher.env.environment.EnvSinglenodeSparkIceberg;
 import io.trino.tests.product.launcher.env.environment.EnvSinglenodeSqlserver;
 import io.trino.tests.product.launcher.env.environment.EnvTwoKerberosHives;
 import io.trino.tests.product.launcher.env.environment.EnvTwoMixedHives;
@@ -41,13 +40,26 @@ public class Suite7NonGeneric
         verify(config.getHadoopBaseImage().equals(EnvironmentDefaults.HADOOP_BASE_IMAGE), "The suite should be run with default HADOOP_BASE_IMAGE. Leave HADOOP_BASE_IMAGE unset.");
 
         return ImmutableList.of(
-                testOnEnvironment(EnvSinglenodeMysql.class).withGroups("mysql").build(),
-                testOnEnvironment(EnvSinglenodePostgresql.class).withGroups("postgresql").build(),
-                testOnEnvironment(EnvSinglenodeSqlserver.class).withGroups("sqlserver").build(),
-                testOnEnvironment(EnvSinglenodeSparkHive.class).withGroups("hive_spark").build(),
-                testOnEnvironment(EnvSinglenodeSparkIceberg.class).withGroups("iceberg").withExcludedGroups("storage_formats").build(),
-                testOnEnvironment(EnvSinglenodeKerberosHdfsImpersonationCrossRealm.class).withGroups("storage_formats", "cli", "hdfs_impersonation").build(),
-                testOnEnvironment(EnvTwoMixedHives.class).withGroups("two_hives").build(),
-                testOnEnvironment(EnvTwoKerberosHives.class).withGroups("two_hives").build());
+                testOnEnvironment(EnvSinglenodePostgresql.class)
+                        .withGroups("configured_features", "postgresql")
+                        .build(),
+                testOnEnvironment(EnvSinglenodeSqlserver.class)
+                        .withGroups("configured_features", "sqlserver")
+                        .build(),
+                testOnEnvironment(EnvSinglenodeSparkHive.class)
+                        .withGroups("configured_features", "hive_spark")
+                        .build(),
+                testOnEnvironment(EnvSinglenodeKerberosHdfsImpersonationCrossRealm.class)
+                        .withGroups("configured_features", "storage_formats", "cli", "hdfs_impersonation")
+                        .build(),
+                testOnEnvironment(EnvMultinodeKerberosKudu.class)
+                        .withGroups("configured_features", "kudu")
+                        .build(),
+                testOnEnvironment(EnvTwoMixedHives.class)
+                        .withGroups("configured_features", "two_hives")
+                        .build(),
+                testOnEnvironment(EnvTwoKerberosHives.class)
+                        .withGroups("configured_features", "two_hives")
+                        .build());
     }
 }

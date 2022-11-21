@@ -13,7 +13,7 @@
  */
 package io.trino.plugin.mongodb;
 
-import com.google.common.net.HostAndPort;
+import com.mongodb.ConnectionString;
 import org.testcontainers.containers.MongoDBContainer;
 
 import java.io.Closeable;
@@ -21,13 +21,11 @@ import java.io.Closeable;
 public class MongoServer
         implements Closeable
 {
-    private static final int MONGO_PORT = 27017;
-
     private final MongoDBContainer dockerContainer;
 
     public MongoServer()
     {
-        this("3.4.0");
+        this("4.0.0");
     }
 
     public MongoServer(String mongoVersion)
@@ -39,9 +37,9 @@ public class MongoServer
         this.dockerContainer.start();
     }
 
-    public HostAndPort getAddress()
+    public ConnectionString getConnectionString()
     {
-        return HostAndPort.fromParts(dockerContainer.getContainerIpAddress(), dockerContainer.getMappedPort(MONGO_PORT));
+        return new ConnectionString(dockerContainer.getReplicaSetUrl());
     }
 
     @Override

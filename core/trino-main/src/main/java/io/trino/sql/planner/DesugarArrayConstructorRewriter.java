@@ -16,8 +16,9 @@ package io.trino.sql.planner;
 import com.google.common.collect.ImmutableMap;
 import io.trino.Session;
 import io.trino.metadata.Metadata;
+import io.trino.operator.scalar.ArrayConstructor;
 import io.trino.spi.type.Type;
-import io.trino.sql.tree.ArrayConstructor;
+import io.trino.sql.tree.Array;
 import io.trino.sql.tree.Expression;
 import io.trino.sql.tree.ExpressionRewriter;
 import io.trino.sql.tree.ExpressionTreeRewriter;
@@ -35,9 +36,9 @@ import static java.util.Objects.requireNonNull;
 
 public final class DesugarArrayConstructorRewriter
 {
-    public static Expression rewrite(Expression expression, Map<NodeRef<Expression>, Type> expressionTypes, Metadata metadata)
+    private static Expression rewrite(Expression expression, Map<NodeRef<Expression>, Type> expressionTypes, Metadata metadata, Session session)
     {
-        return ExpressionTreeRewriter.rewriteWith(new Visitor(expressionTypes, metadata), expression);
+        return ExpressionTreeRewriter.rewriteWith(new Visitor(expressionTypes, metadata, session), expression);
     }
 
     private DesugarArrayConstructorRewriter() {}
@@ -52,7 +53,7 @@ public final class DesugarArrayConstructorRewriter
         }
         Map<NodeRef<Expression>, Type> expressionTypes = typeAnalyzer.getTypes(session, typeProvider, expression);
 
-        return rewrite(expression, expressionTypes, metadata);
+        return rewrite(expression, expressionTypes, metadata, session);
     }
 
     private static class Visitor
@@ -60,20 +61,22 @@ public final class DesugarArrayConstructorRewriter
     {
         private final Map<NodeRef<Expression>, Type> expressionTypes;
         private final Metadata metadata;
+        private final Session session;
 
-        public Visitor(Map<NodeRef<Expression>, Type> expressionTypes, Metadata metadata)
+        public Visitor(Map<NodeRef<Expression>, Type> expressionTypes, Metadata metadata, Session session)
         {
             this.expressionTypes = ImmutableMap.copyOf(requireNonNull(expressionTypes, "expressionTypes is null"));
             this.metadata = metadata;
+            this.session = session;
         }
 
         @Override
-        public Expression rewriteArrayConstructor(ArrayConstructor node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
+        public Expression rewriteArray(Array node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
         {
-            ArrayConstructor rewritten = treeRewriter.defaultRewrite(node, context);
+            Array rewritten = treeRewriter.defaultRewrite(node, context);
             checkCondition(node.getValues().size() <= 254, TOO_MANY_ARGUMENTS, "Too many arguments for array constructor");
-            return new FunctionCallBuilder(metadata)
-                    .setName(QualifiedName.of(ArrayConstructor.ARRAY_CONSTRUCTOR))
+            return FunctionCallBuilder.resolve(session, metadata)
+                    .setName(QualifiedName.of(ArrayConstructor.NAME))
                     .setArguments(getTypes(node.getValues()), rewritten.getValues())
                     .build();
         }

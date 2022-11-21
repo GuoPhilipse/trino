@@ -13,13 +13,18 @@
  */
 package io.trino.spi.eventlistener;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.trino.spi.Unstable;
 
 import java.util.List;
 import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
 
+/**
+ * This class is JSON serializable for convenience and serialization compatibility is not guaranteed across versions.
+ */
 public class QueryOutputMetadata
 {
     private final String catalogName;
@@ -30,6 +35,8 @@ public class QueryOutputMetadata
     private final Optional<String> connectorOutputMetadata;
     private final Optional<Boolean> jsonLengthLimitExceeded;
 
+    @JsonCreator
+    @Unstable
     public QueryOutputMetadata(String catalogName, String schema, String table, Optional<List<OutputColumnMetadata>> columns, Optional<String> connectorOutputMetadata, Optional<Boolean> jsonLengthLimitExceeded)
     {
         this.catalogName = requireNonNull(catalogName, "catalogName is null");

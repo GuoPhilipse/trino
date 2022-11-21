@@ -14,15 +14,16 @@
 package io.trino.spiller;
 
 import com.google.common.collect.ImmutableList;
+import io.trino.FeaturesConfig;
 import io.trino.RowPagesBuilder;
 import io.trino.execution.buffer.PagesSerde;
 import io.trino.execution.buffer.PagesSerdeFactory;
 import io.trino.memory.context.AggregatedMemoryContext;
-import io.trino.metadata.Metadata;
 import io.trino.spi.Page;
 import io.trino.spi.block.BlockBuilder;
+import io.trino.spi.block.BlockEncodingSerde;
+import io.trino.spi.block.TestingBlockEncodingSerde;
 import io.trino.spi.type.Type;
-import io.trino.sql.analyzer.FeaturesConfig;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
@@ -33,12 +34,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
 import static io.trino.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
-import static io.trino.metadata.MetadataManager.createTestMetadataManager;
 import static io.trino.operator.PageAssertions.assertPageEquals;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
@@ -69,16 +70,16 @@ public class TestBinaryFileSpiller
     @BeforeMethod
     public void setUp()
     {
-        Metadata metadata = createTestMetadataManager();
         spillerStats = new SpillerStats();
         FeaturesConfig featuresConfig = new FeaturesConfig();
         featuresConfig.setSpillerSpillPaths(spillPath.getAbsolutePath());
         featuresConfig.setSpillMaxUsedSpaceThreshold(1.0);
         NodeSpillConfig nodeSpillConfig = new NodeSpillConfig();
-        singleStreamSpillerFactory = new FileSingleStreamSpillerFactory(metadata, spillerStats, featuresConfig, nodeSpillConfig);
+        BlockEncodingSerde blockEncodingSerde = new TestingBlockEncodingSerde();
+        singleStreamSpillerFactory = new FileSingleStreamSpillerFactory(blockEncodingSerde, spillerStats, featuresConfig, nodeSpillConfig);
         factory = new GenericSpillerFactory(singleStreamSpillerFactory);
-        PagesSerdeFactory pagesSerdeFactory = new PagesSerdeFactory(metadata.getBlockEncodingSerde(), nodeSpillConfig.isSpillCompressionEnabled());
-        pagesSerde = pagesSerdeFactory.createPagesSerde();
+        PagesSerdeFactory pagesSerdeFactory = new PagesSerdeFactory(blockEncodingSerde, nodeSpillConfig.isSpillCompressionEnabled());
+        pagesSerde = pagesSerdeFactory.createPagesSerde(Optional.empty());
         memoryContext = newSimpleAggregatedMemoryContext();
     }
 
@@ -139,20 +140,18 @@ public class TestBinaryFileSpiller
     }
 
     @SafeVarargs
-    private final void testSpiller(List<Type> types, Spiller spiller, List<Page>... spills)
+    private void testSpiller(List<Type> types, Spiller spiller, List<Page>... spills)
             throws ExecutionException, InterruptedException
     {
         long spilledBytesBefore = spillerStats.getTotalSpilledBytes();
         long spilledBytes = 0;
 
         assertEquals(memoryContext.getBytes(), 0);
-        try (PagesSerde.PagesSerdeContext context = pagesSerde.newContext()) {
-            for (List<Page> spill : spills) {
-                spilledBytes += spill.stream()
-                        .mapToLong(page -> pagesSerde.serialize(context, page).getSizeInBytes())
-                        .sum();
-                spiller.spill(spill.iterator()).get();
-            }
+        for (List<Page> spill : spills) {
+            spilledBytes += spill.stream()
+                    .mapToLong(page -> pagesSerde.serialize(page).length())
+                    .sum();
+            spiller.spill(spill.iterator()).get();
         }
         assertEquals(spillerStats.getTotalSpilledBytes() - spilledBytesBefore, spilledBytes);
         // At this point, the buffers should still be accounted for in the memory context, because

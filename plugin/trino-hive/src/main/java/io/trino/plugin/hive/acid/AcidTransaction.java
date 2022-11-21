@@ -16,7 +16,6 @@ package io.trino.plugin.hive.acid;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import io.trino.orc.OrcWriter.OrcOperation;
 import io.trino.plugin.hive.HiveUpdateProcessor;
 import io.trino.plugin.hive.WriterKind;
 
@@ -27,6 +26,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static io.trino.plugin.hive.acid.AcidOperation.CREATE_TABLE;
 import static io.trino.plugin.hive.acid.AcidOperation.DELETE;
 import static io.trino.plugin.hive.acid.AcidOperation.INSERT;
+import static io.trino.plugin.hive.acid.AcidOperation.MERGE;
 import static io.trino.plugin.hive.acid.AcidOperation.NONE;
 import static io.trino.plugin.hive.acid.AcidOperation.UPDATE;
 import static java.util.Objects.requireNonNull;
@@ -50,10 +50,10 @@ public class AcidTransaction
         this.operation = requireNonNull(operation, "operation is null");
         this.transactionId = transactionId;
         this.writeId = writeId;
-        this.updateProcessor = updateProcessor;
+        this.updateProcessor = requireNonNull(updateProcessor, "updateProcessor is null");
     }
 
-    @JsonProperty("operation")
+    @JsonProperty
     public AcidOperation getOperation()
     {
         return operation;
@@ -80,20 +80,13 @@ public class AcidTransaction
     @JsonIgnore
     public boolean isAcidTransactionRunning()
     {
-        return operation == INSERT || operation == DELETE || operation == UPDATE;
+        return operation == INSERT || operation == CREATE_TABLE || operation == DELETE || operation == UPDATE || operation == MERGE;
     }
 
     @JsonIgnore
     public boolean isTransactional()
     {
         return operation != AcidOperation.NONE;
-    }
-
-    @JsonIgnore
-    public Optional<OrcOperation> getOrcOperation()
-    {
-        ensureTransactionRunning("accessing orcOperation");
-        return operation.getOrcOperation();
     }
 
     @JsonIgnore
@@ -133,9 +126,10 @@ public class AcidTransaction
         return operation == UPDATE;
     }
 
-    public boolean isAcidInsertOperation(WriterKind writerKind)
+    @JsonIgnore
+    public boolean isMerge()
     {
-        return isInsert() || (isUpdate() && writerKind == WriterKind.INSERT);
+        return operation == MERGE;
     }
 
     public boolean isAcidDeleteOperation(WriterKind writerKind)

@@ -19,15 +19,12 @@ import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.function.AccumulatorStateSerializer;
 import io.trino.spi.type.Type;
-import io.trino.spi.type.UnscaledDecimal128Arithmetic;
 
 import static io.trino.spi.type.VarbinaryType.VARBINARY;
 
 public class LongDecimalWithOverflowStateSerializer
         implements AccumulatorStateSerializer<LongDecimalWithOverflowState>
 {
-    private static final int SERIALIZED_SIZE = Long.BYTES + UnscaledDecimal128Arithmetic.UNSCALED_DECIMAL_128_SLICE_LENGTH;
-
     @Override
     public Type getSerializedType()
     {
@@ -37,13 +34,25 @@ public class LongDecimalWithOverflowStateSerializer
     @Override
     public void serialize(LongDecimalWithOverflowState state, BlockBuilder out)
     {
-        Slice decimal = state.getLongDecimal();
-        if (decimal == null) {
-            out.appendNull();
+        if (state.isNotNull()) {
+            long overflow = state.getOverflow();
+            long[] decimal = state.getDecimalArray();
+            int offset = state.getDecimalArrayOffset();
+            long[] buffer = new long[3];
+            long low = decimal[offset + 1];
+            long high = decimal[offset];
+            buffer[0] = low;
+            buffer[1] = high;
+            buffer[2] = overflow;
+            // if high == 0 and overflow == 0 we only write low (bufferLength = 1)
+            // if high != 0 and overflow == 0 we write both low and high (bufferLength = 2)
+            // if overflow != 0 we write all values (bufferLength = 3)
+            int decimalsCount = 1 + (high == 0 ? 0 : 1);
+            int bufferLength = overflow == 0 ? decimalsCount : 3;
+            VARBINARY.writeSlice(out, Slices.wrappedLongArray(buffer, 0, bufferLength));
         }
         else {
-            long overflow = state.getOverflow();
-            VARBINARY.writeSlice(out, Slices.wrappedLongArray(overflow, decimal.getLong(0), decimal.getLong(Long.BYTES)));
+            out.appendNull();
         }
     }
 
@@ -52,15 +61,26 @@ public class LongDecimalWithOverflowStateSerializer
     {
         if (!block.isNull(index)) {
             Slice slice = VARBINARY.getSlice(block, index);
-            if (slice.length() != SERIALIZED_SIZE) {
-                throw new IllegalStateException("Unexpected serialized state size: " + slice.length());
+            long[] decimal = state.getDecimalArray();
+            int offset = state.getDecimalArrayOffset();
+
+            long low = slice.getLong(0);
+            int sliceLength = slice.length();
+            long high = 0;
+            long overflow = 0;
+
+            switch (sliceLength) {
+                case 3 * Long.BYTES:
+                    overflow = slice.getLong(Long.BYTES * 2);
+                    // fall through
+                case 2 * Long.BYTES:
+                    high = slice.getLong(Long.BYTES);
             }
 
-            long overflow = slice.getLong(0);
-            Slice decimal = Slices.wrappedLongArray(slice.getLong(Long.BYTES), slice.getLong(Long.BYTES * 2));
-
+            decimal[offset + 1] = low;
+            decimal[offset] = high;
             state.setOverflow(overflow);
-            state.setLongDecimal(decimal);
+            state.setNotNull();
         }
     }
 }

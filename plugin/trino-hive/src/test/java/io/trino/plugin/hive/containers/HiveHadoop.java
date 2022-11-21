@@ -16,6 +16,8 @@ package io.trino.plugin.hive.containers;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.net.HostAndPort;
+import io.airlift.log.Logger;
+import io.trino.testing.TestingProperties;
 import io.trino.testing.containers.BaseTestContainer;
 import org.testcontainers.containers.Network;
 
@@ -23,17 +25,18 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static java.lang.String.format;
+
 public class HiveHadoop
         extends BaseTestContainer
 {
-    private static final String IMAGE_VERSION = "43";
-    public static final String DEFAULT_IMAGE = "ghcr.io/trinodb/testing/hdp2.6-hive:" + IMAGE_VERSION;
-    public static final String HIVE3_IMAGE = "ghcr.io/trinodb/testing/hdp3.1-hive:" + IMAGE_VERSION;
+    private static final Logger log = Logger.get(HiveHadoop.class);
+
+    public static final String DEFAULT_IMAGE = "ghcr.io/trinodb/testing/hdp2.6-hive:" + TestingProperties.getDockerImagesVersion();
+    public static final String HIVE3_IMAGE = "ghcr.io/trinodb/testing/hdp3.1-hive:" + TestingProperties.getDockerImagesVersion();
 
     public static final String HOST_NAME = "hadoop-master";
 
-    public static final int PROXY_PORT = 1180;
-    public static final int HIVE_SERVER_PORT = 10000;
     public static final int HIVE_METASTORE_PORT = 9083;
 
     public static Builder builder()
@@ -65,21 +68,29 @@ public class HiveHadoop
     {
         super.setupContainer();
         String runCmd = "/usr/local/hadoop-run.sh";
-        copyFileToContainer("containers/hive_hadoop/hadoop-run.sh", runCmd);
+        copyResourceToContainer("containers/hive_hadoop/hadoop-run.sh", runCmd);
         withRunCommand(
                 ImmutableList.of(
                         "/bin/bash",
                         runCmd));
+        withLogConsumer(new PrintingLogConsumer(format("%-20s| ", "hadoop")));
     }
 
-    public HostAndPort getMappedHdfsSocksProxy()
+    @Override
+    public void start()
     {
-        return getMappedHostAndPortForExposedPort(PROXY_PORT);
+        super.start();
+        log.info("Hive container started with addresses for metastore: %s", getHiveMetastoreEndpoint());
     }
 
-    public HostAndPort getHiveServerEndpoint()
+    public String runOnHive(String query)
     {
-        return getMappedHostAndPortForExposedPort(HIVE_SERVER_PORT);
+        return executeInContainerFailOnError("beeline", "-u", "jdbc:hive2://localhost:10000/default", "-n", "hive", "-e", query);
+    }
+
+    public String runOnMetastore(String query)
+    {
+        return executeInContainerFailOnError("mysql", "-D", "metastore", "-uroot", "-proot", "--batch", "--column-names=false", "-e", query).replaceAll("\n$", "");
     }
 
     public HostAndPort getHiveMetastoreEndpoint()
@@ -94,10 +105,7 @@ public class HiveHadoop
         {
             this.image = DEFAULT_IMAGE;
             this.hostName = HOST_NAME;
-            this.exposePorts =
-                    ImmutableSet.of(
-                            HIVE_METASTORE_PORT,
-                            PROXY_PORT);
+            this.exposePorts = ImmutableSet.of(HIVE_METASTORE_PORT);
         }
 
         @Override

@@ -63,7 +63,14 @@ public class InvocationConvention
         return supportsSession;
     }
 
+    // TODO remove some time after nearest release
+    @Deprecated
     public boolean supportsInstanceFactor()
+    {
+        return supportsInstanceFactory();
+    }
+
+    public boolean supportsInstanceFactory()
     {
         return supportsInstanceFactory;
     }
@@ -103,7 +110,7 @@ public class InvocationConvention
          */
         NEVER_NULL(false, 1),
         /**
-         * Argument is always an object type. A SQL null will be passed a Java null.
+         * Argument is always an object type. An SQL null will be passed a Java null.
          */
         BOXED_NULLABLE(true, 1),
         /**
@@ -116,6 +123,10 @@ public class InvocationConvention
          * sql value may be null.
          */
         BLOCK_POSITION(true, 2),
+        /**
+         * Argument is passed in an InOut. The sql value may be null.
+         */
+        IN_OUT(true, 1),
         /**
          * Argument is a lambda function.
          */

@@ -18,9 +18,11 @@ import io.trino.tempto.Requires;
 import io.trino.tempto.fulfillment.table.hive.tpch.ImmutableTpchTablesRequirements.ImmutableNationTable;
 import org.testng.annotations.Test;
 
+import static io.trino.tempto.assertions.QueryAssert.assertQueryFailure;
 import static io.trino.tempto.assertions.QueryAssert.assertThat;
-import static io.trino.tempto.query.QueryExecutor.query;
+import static io.trino.testing.TestingNames.randomNameSuffix;
 import static io.trino.tests.product.TestGroups.CREATE_TABLE;
+import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
 
 @Requires(ImmutableNationTable.class)
@@ -31,17 +33,46 @@ public class TestCreateTable
     public void shouldCreateTableAsSelect()
     {
         String tableName = "create_table_as_select";
-        query(format("DROP TABLE IF EXISTS %s", tableName));
-        query(format("CREATE TABLE %s(nationkey, name) AS SELECT n_nationkey, n_name FROM nation", tableName));
-        assertThat(query(format("SELECT * FROM %s", tableName))).hasRowsCount(25);
+        onTrino().executeQuery(format("DROP TABLE IF EXISTS %s", tableName));
+        onTrino().executeQuery(format("CREATE TABLE %s(nationkey, name) AS SELECT n_nationkey, n_name FROM nation", tableName));
+        assertThat(onTrino().executeQuery(format("SELECT * FROM %s", tableName))).hasRowsCount(25);
     }
 
     @Test(groups = CREATE_TABLE)
     public void shouldCreateTableAsEmptySelect()
     {
         String tableName = "create_table_as_empty_select";
-        query(format("DROP TABLE IF EXISTS %s", tableName));
-        query(format("CREATE TABLE %s(nationkey, name) AS SELECT n_nationkey, n_name FROM nation WHERE 0 is NULL", tableName));
-        assertThat(query(format("SELECT nationkey, name FROM %s", tableName))).hasRowsCount(0);
+        onTrino().executeQuery(format("DROP TABLE IF EXISTS %s", tableName));
+        onTrino().executeQuery(format("CREATE TABLE %s(nationkey, name) AS SELECT n_nationkey, n_name FROM nation WHERE 0 is NULL", tableName));
+        assertThat(onTrino().executeQuery(format("SELECT nationkey, name FROM %s", tableName))).hasRowsCount(0);
+    }
+
+    /**
+     * {@code BaseConnectorTest.testCreateTableSchemaNotFound()} copy run against Thrift metastore.
+     */
+    @Test(groups = CREATE_TABLE)
+    public void shouldNotCreateTableInNonExistentSchema()
+    {
+        String schemaName = "test_schema_" + randomNameSuffix();
+        String table = schemaName + ".test_create_no_schema_" + randomNameSuffix();
+        assertQueryFailure(() -> onTrino().executeQuery("CREATE TABLE " + table + " (a bigint)"))
+                .hasMessageMatching("\\QQuery failed (#\\E\\S+\\Q): Schema " + schemaName + " not found");
+
+        // Validate that table, nor schema, was not created
+        assertQueryFailure(() -> onTrino().executeQuery("TABLE " + table))
+                .hasMessageMatching("\\QQuery failed (#\\E\\S+\\Q): line 1:1: Schema '" + schemaName + "' does not exist");
+    }
+
+    @Test(groups = CREATE_TABLE)
+    public void shouldNotCreateExternalTableInNonExistentSchema()
+    {
+        String schemaName = "test_schema_" + randomNameSuffix();
+        String table = schemaName + ".test_create_no_schema_" + randomNameSuffix();
+        assertQueryFailure(() -> onTrino().executeQuery("CREATE TABLE " + table + " (a bigint) WITH (external_location = '/tmp')"))
+                .hasMessageMatching("\\QQuery failed (#\\E\\S+\\Q): Schema " + schemaName + " not found");
+
+        // Validate that table, nor schema, was not created
+        assertQueryFailure(() -> onTrino().executeQuery("TABLE " + table))
+                .hasMessageMatching("\\QQuery failed (#\\E\\S+\\Q): line 1:1: Schema '" + schemaName + "' does not exist");
     }
 }

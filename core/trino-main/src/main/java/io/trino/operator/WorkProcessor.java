@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static java.util.Objects.requireNonNull;
 
@@ -64,6 +65,11 @@ public interface WorkProcessor<T>
     default WorkProcessor<T> yielding(BooleanSupplier yieldSignal)
     {
         return WorkProcessorUtils.yielding(this, yieldSignal);
+    }
+
+    default WorkProcessor<T> blocking(Supplier<ListenableFuture<Void>> futureSupplier)
+    {
+        return WorkProcessorUtils.blocking(this, futureSupplier);
     }
 
     default WorkProcessor<T> withProcessEntryMonitor(Runnable monitor)
@@ -202,7 +208,7 @@ public interface WorkProcessor<T>
     @Immutable
     final class TransformationState<T>
     {
-        private static final TransformationState<?> NEEDS_MORE_DATE_STATE = new TransformationState<>(Type.NEEDS_MORE_DATA, true, null, null);
+        private static final TransformationState<?> NEEDS_MORE_DATA_STATE = new TransformationState<>(Type.NEEDS_MORE_DATA, true, null, null);
         private static final TransformationState<?> YIELD_STATE = new TransformationState<>(Type.YIELD, false, null, null);
         private static final TransformationState<?> FINISHED_STATE = new TransformationState<>(Type.FINISHED, false, null, null);
 
@@ -238,7 +244,7 @@ public interface WorkProcessor<T>
         @SuppressWarnings("unchecked")
         public static <T> TransformationState<T> needsMoreData()
         {
-            return (TransformationState<T>) NEEDS_MORE_DATE_STATE;
+            return (TransformationState<T>) NEEDS_MORE_DATA_STATE;
         }
 
         /**

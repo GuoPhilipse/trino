@@ -16,23 +16,18 @@ package io.trino.tests.product.hive;
 import io.trino.tempto.Requirement;
 import io.trino.tempto.RequirementsProvider;
 import io.trino.tempto.configuration.Configuration;
-import org.assertj.core.api.InstanceOfAssertFactories;
 import org.intellij.lang.annotations.Language;
 import org.testng.annotations.Test;
 
-import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.tempto.assertions.QueryAssert.Row.row;
 import static io.trino.tempto.assertions.QueryAssert.assertThat;
 import static io.trino.tempto.fulfillment.table.TableRequirements.immutableTable;
 import static io.trino.tempto.fulfillment.table.hive.tpch.TpchTableDefinitions.ORDERS;
-import static io.trino.tempto.query.QueryExecutor.query;
 import static io.trino.tests.product.TestGroups.HIVE_COMPRESSION;
-import static io.trino.tests.product.TestGroups.SKIP_ON_CDH;
 import static io.trino.tests.product.utils.QueryExecutors.onHive;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class TestHiveCompression
         extends HiveProductTest
@@ -44,7 +39,7 @@ public class TestHiveCompression
         return immutableTable(ORDERS);
     }
 
-    @Test(groups = {HIVE_COMPRESSION, SKIP_ON_CDH /* no lzo support in CDH image */})
+    @Test(groups = HIVE_COMPRESSION)
     public void testReadTextfileWithLzop()
     {
         testReadCompressedTextfileTable(
@@ -53,7 +48,7 @@ public class TestHiveCompression
                 ".*\\.lzo"); // LZOP compression uses .lzo file extension by default
     }
 
-    @Test(groups = {HIVE_COMPRESSION, SKIP_ON_CDH /* no lzo support in CDH image */})
+    @Test(groups = HIVE_COMPRESSION)
     public void testReadSequencefileWithLzo()
     {
         testReadCompressedTextfileTable(
@@ -77,7 +72,7 @@ public class TestHiveCompression
                 tableName));
         onHive().executeQuery(format("INSERT INTO %s VALUES(1, 'test data')", tableName));
 
-        assertThat(query("SELECT * FROM " + tableName)).containsExactlyInOrder(row(1, "test data"));
+        assertThat(onTrino().executeQuery("SELECT * FROM " + tableName)).containsExactlyInOrder(row(1, "test data"));
 
         onHive().executeQuery("DROP TABLE " + tableName);
     }
@@ -91,20 +86,7 @@ public class TestHiveCompression
     @Test(groups = HIVE_COMPRESSION)
     public void testSnappyCompressedParquetTableCreatedInTrinoWithNativeWriter()
     {
-        if (getHiveVersionMajor() >= 2) {
-            testSnappyCompressedParquetTableCreatedInTrino(true);
-            return;
-        }
-
-        // TODO (https://github.com/trinodb/trino/issues/6377) Native Parquet writer creates files that cannot be read by Hive
-        assertThatThrownBy(() -> testSnappyCompressedParquetTableCreatedInTrino(true))
-                .hasStackTraceContaining("at org.apache.hive.jdbc.HiveQueryResultSet.next") // comes via Hive JDBC
-                .extracting(Throwable::toString, InstanceOfAssertFactories.STRING)
-                // There are a few cases here each of which are downstream:
-                // - HDP 2 and CDH 5 cannot read Parquet V2 files and throw "org.apache.parquet.io.ParquetDecodingException: Can not read value at 0 in block -1 in file"
-                // - CDH 5 Parquet uses parquet.* packages, while HDP 2 uses org.apache.parquet.* packages
-                // - HDP 3 throws java.lang.ClassCastException: org.apache.hadoop.io.BytesWritable cannot be cast to org.apache.hadoop.hive.serde2.io.HiveVarcharWritable
-                .matches("\\Qio.trino.tempto.query.QueryExecutionException: java.sql.SQLException: java.io.IOException:\\E (org.apache.)?parquet.io.ParquetDecodingException: Can not read value at 0 in block -1 in file .*");
+        testSnappyCompressedParquetTableCreatedInTrino(true);
     }
 
     private void testSnappyCompressedParquetTableCreatedInTrino(boolean optimizedParquetWriter)
@@ -118,9 +100,9 @@ public class TestHiveCompression
                         "WITH (format='PARQUET')",
                 tableName));
 
-        String catalog = (String) getOnlyElement(getOnlyElement(onTrino().executeQuery("SELECT CURRENT_CATALOG").rows()));
+        String catalog = (String) onTrino().executeQuery("SELECT CURRENT_CATALOG").getOnlyValue();
         onTrino().executeQuery("SET SESSION " + catalog + ".compression_codec = 'SNAPPY'");
-        onTrino().executeQuery("SET SESSION " + catalog + ".experimental_parquet_optimized_writer_enabled = " + optimizedParquetWriter);
+        onTrino().executeQuery("SET SESSION " + catalog + ".parquet_optimized_writer_enabled = " + optimizedParquetWriter);
         onTrino().executeQuery(format("INSERT INTO %s VALUES(1, 'test data')", tableName));
 
         assertThat(onTrino().executeQuery("SELECT * FROM " + tableName)).containsExactlyInOrder(row(1, "test data"));
@@ -144,7 +126,7 @@ public class TestHiveCompression
             assertThat(onTrino().executeQuery("SELECT sum(o_orderkey) FROM test_read_compressed"))
                     .containsExactlyInOrder(row(4499987250000L));
 
-            assertThat((String) onTrino().executeQuery("SELECT regexp_replace(\"$path\", '.*/') FROM test_read_compressed LIMIT 1").row(0).get(0))
+            assertThat((String) onTrino().executeQuery("SELECT regexp_replace(\"$path\", '.*/') FROM test_read_compressed LIMIT 1").getOnlyValue())
                     .matches(expectedFileNamePattern);
         }
         finally {

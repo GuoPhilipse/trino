@@ -13,11 +13,18 @@
  */
 package io.trino.spi.eventlistener;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import io.trino.spi.Unstable;
+
 import java.time.Instant;
 import java.util.StringJoiner;
 
 import static java.util.Objects.requireNonNull;
 
+/**
+ * This class is JSON serializable for convenience and serialization compatibility is not guaranteed across versions.
+ */
 public class QueryCreatedEvent
 {
     private final Instant createTime;
@@ -25,6 +32,8 @@ public class QueryCreatedEvent
     private final QueryContext context;
     private final QueryMetadata metadata;
 
+    @JsonCreator
+    @Unstable
     public QueryCreatedEvent(Instant createTime, QueryContext context, QueryMetadata metadata)
     {
         this.createTime = requireNonNull(createTime, "createTime is null");
@@ -32,16 +41,19 @@ public class QueryCreatedEvent
         this.metadata = requireNonNull(metadata, "metadata is null");
     }
 
+    @JsonProperty
     public Instant getCreateTime()
     {
         return createTime;
     }
 
+    @JsonProperty
     public QueryContext getContext()
     {
         return context;
     }
 
+    @JsonProperty
     public QueryMetadata getMetadata()
     {
         return metadata;

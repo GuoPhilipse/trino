@@ -29,6 +29,7 @@ import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.matching.Pattern.typeOf;
 import static io.trino.matching.Property.optionalProperty;
 import static io.trino.matching.Property.property;
+import static io.trino.sql.planner.plan.Patterns.Values.rowCount;
 
 public final class Patterns
 {
@@ -64,6 +65,16 @@ public final class Patterns
         return typeOf(UpdateNode.class);
     }
 
+    public static Pattern<TableExecuteNode> tableExecute()
+    {
+        return typeOf(TableExecuteNode.class);
+    }
+
+    public static Pattern<MergeWriterNode> mergeWriter()
+    {
+        return typeOf(MergeWriterNode.class);
+    }
+
     public static Pattern<ExchangeNode> exchange()
     {
         return typeOf(ExchangeNode.class);
@@ -97,6 +108,11 @@ public final class Patterns
     public static Pattern<JoinNode> join()
     {
         return typeOf(JoinNode.class);
+    }
+
+    public static Pattern<DynamicFilterSourceNode> dynamicFilterSource()
+    {
+        return typeOf(DynamicFilterSourceNode.class);
     }
 
     public static Pattern<SpatialJoinNode> spatialJoin()
@@ -179,6 +195,11 @@ public final class Patterns
         return typeOf(ValuesNode.class);
     }
 
+    public static Pattern<ValuesNode> emptyValues()
+    {
+        return values().with(rowCount().equalTo(0));
+    }
+
     public static Pattern<UnnestNode> unnest()
     {
         return typeOf(UnnestNode.class);
@@ -192,6 +213,11 @@ public final class Patterns
     public static Pattern<PatternRecognitionNode> patternRecognition()
     {
         return typeOf(PatternRecognitionNode.class);
+    }
+
+    public static Pattern<TableFunctionNode> tableFunction()
+    {
+        return typeOf(TableFunctionNode.class);
     }
 
     public static Pattern<RowNumberNode> rowNumber()

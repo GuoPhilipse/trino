@@ -2,6 +2,10 @@
 Google Sheets connector
 =======================
 
+.. raw:: html
+
+  <img src="../_static/img/google-sheets.png" class="connector-logo">
+
 The Google Sheets connector allows reading `Google Sheets <https://www.google.com/sheets/about/>`_ spreadsheets as tables in Trino.
 
 Configuration
@@ -14,8 +18,8 @@ replacing the properties as appropriate:
 .. code-block:: text
 
     connector.name=gsheets
-    credentials-path=/path/to/google-sheets-credentials.json
-    metadata-sheet-id=exampleId
+    gsheets.credentials-path=/path/to/google-sheets-credentials.json
+    gsheets.metadata-sheet-id=exampleId
 
 Configuration properties
 ------------------------
@@ -23,12 +27,12 @@ Configuration properties
 The following configuration properties are available:
 
 =================================== =====================================================================
-Property Name                       Description
+Property name                       Description
 =================================== =====================================================================
-``credentials-path``                Path to the Google API JSON key file
-``metadata-sheet-id``               Sheet ID of the spreadsheet, that contains the table mapping
-``sheets-data-max-cache-size``      Maximum number of spreadsheets to cache, defaults to ``1000``
-``sheets-data-expire-after-write``  How long to cache spreadsheet data or metadata, defaults to ``5m``
+``gsheets.credentials-path``        Path to the Google API JSON key file
+``gsheets.metadata-sheet-id``       Sheet ID of the spreadsheet, that contains the table mapping
+``gsheets.max-data-cache-size``     Maximum number of spreadsheets to cache, defaults to ``1000``
+``gsheets.data-cache-ttl``          How long to cache spreadsheet data or metadata, defaults to ``5m``
 =================================== =====================================================================
 
 Credentials
@@ -48,7 +52,7 @@ The connector requires credentials in order to access the Google Sheets API.
    On the *Create key* step, create and download a key in JSON format.
 
 The key file needs to be available on the Trino coordinator and workers.
-Set the ``credentials-path`` configuration property to point to this file.
+Set the ``gsheets.credentials-path`` configuration property to point to this file.
 The exact name of the file does not matter -- it can be named anything.
 
 Metadata sheet
@@ -70,7 +74,7 @@ The metadata sheet must be shared with the service account user,
 the one for which the key credentials file was created. Click the *Share*
 button to share the sheet with the email address of the service account.
 
-Set the ``metadata-sheet-id`` configuration property to the ID of this sheet.
+Set the ``gsheets.metadata-sheet-id`` configuration property to the ID of this sheet.
 
 Querying sheets
 ---------------
@@ -93,6 +97,29 @@ that may impact the usage of this connector. Increasing the cache duration and/o
 may prevent the limit from being reached. Running queries on the ``information_schema.columns``
 table without a schema and table name filter may lead to hitting the limit, as this requires
 fetching the sheet data for every table, unless it is already cached.
+
+Type mapping
+------------
+
+Because Trino and Google Sheets each support types that the other does not, this
+connector :ref:`modifies some types <type-mapping-overview>` when reading data.
+
+Google Sheets type to Trino type mapping
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The connector maps Google Sheets types to the corresponding Trino types
+following this table:
+
+.. list-table:: Google Sheets type to Trino type mapping
+  :widths: 30, 20
+  :header-rows: 1
+
+  * - Google Sheets type
+    - Trino type
+  * - ``TEXT``
+    - ``VARCHAR``
+
+No other types are supported.
 
 .. _google-sheets-sql-support:
 

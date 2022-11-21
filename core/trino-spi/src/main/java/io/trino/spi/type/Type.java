@@ -22,6 +22,7 @@ import io.trino.spi.connector.ConnectorSession;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static io.trino.spi.type.TypeOperatorDeclaration.NO_TYPE_OPERATOR_DECLARATION;
 import static java.util.Objects.requireNonNull;
@@ -170,6 +171,46 @@ public interface Type
      * The type of the values must match {@link #getJavaType}
      */
     default Optional<Range> getRange()
+    {
+        return Optional.empty();
+    }
+
+    /**
+     * Returns the maximum value that compares less than {@code value}.
+     * <p>
+     * The type of the value must match {@link #getJavaType}.
+     *
+     * @throws IllegalStateException if this type is not {@link #isOrderable() orderable}
+     */
+    default Optional<Object> getPreviousValue(Object value)
+    {
+        if (!isOrderable()) {
+            throw new IllegalStateException("Type is not orderable: " + this);
+        }
+        requireNonNull(value, "value is null");
+        return Optional.empty();
+    }
+
+    /**
+     * Returns the minimum value that compares greater than {@code value}.
+     * <p>
+     * The type of the value must match {@link #getJavaType}.
+     *
+     * @throws IllegalStateException if this type is not {@link #isOrderable() orderable}
+     */
+    default Optional<Object> getNextValue(Object value)
+    {
+        if (!isOrderable()) {
+            throw new IllegalStateException("Type is not orderable: " + this);
+        }
+        requireNonNull(value, "value is null");
+        return Optional.empty();
+    }
+
+    /**
+     * Returns a stream of discrete values inside the specified range (if supported by this type).
+     */
+    default Optional<Stream<?>> getDiscreteValues(Range range)
     {
         return Optional.empty();
     }

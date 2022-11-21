@@ -15,6 +15,7 @@ package io.trino.metadata;
 
 import io.trino.Session;
 import io.trino.spi.connector.CatalogSchemaName;
+import io.trino.spi.connector.CatalogSchemaTableName;
 import io.trino.spi.security.GrantInfo;
 import io.trino.spi.security.Identity;
 import io.trino.spi.security.Privilege;
@@ -22,7 +23,6 @@ import io.trino.spi.security.RoleGrant;
 import io.trino.spi.security.TrinoPrincipal;
 
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 
 public interface SystemSecurityMetadata
@@ -48,12 +48,6 @@ public interface SystemSecurityMetadata
      * List available roles.
      */
     Set<String> listRoles(Session session);
-
-    /**
-     * List all role grants,
-     * optionally filtered by passed role, grantee, and limit predicates.
-     */
-    Set<RoleGrant> listAllRoleGrants(Session session, Optional<Set<String>> roles, Optional<Set<String>> grantees, OptionalLong limit);
 
     /**
      * List roles grants for a given principal, not recursively.
@@ -90,6 +84,11 @@ public interface SystemSecurityMetadata
     void grantSchemaPrivileges(Session session, CatalogSchemaName schemaName, Set<Privilege> privileges, TrinoPrincipal grantee, boolean grantOption);
 
     /**
+     * Denys the specified privilege to the specified user on the specified schema.
+     */
+    void denySchemaPrivileges(Session session, CatalogSchemaName schemaName, Set<Privilege> privileges, TrinoPrincipal grantee);
+
+    /**
      * Revokes the specified privilege on the specified schema from the specified user.
      */
     void revokeSchemaPrivileges(Session session, CatalogSchemaName schemaName, Set<Privilege> privileges, TrinoPrincipal grantee, boolean grantOption);
@@ -100,6 +99,11 @@ public interface SystemSecurityMetadata
     void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, TrinoPrincipal grantee, boolean grantOption);
 
     /**
+     * Denys the specified privilege to the specified user on the specified table
+     */
+    void denyTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, TrinoPrincipal grantee);
+
+    /**
      * Revokes the specified privilege on the specified table from the specified user
      */
     void revokeTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, TrinoPrincipal grantee, boolean grantOption);
@@ -108,4 +112,59 @@ public interface SystemSecurityMetadata
      * Gets the privileges for the specified table available to the given grantee considering the selected session role
      */
     Set<GrantInfo> listTablePrivileges(Session session, QualifiedTablePrefix prefix);
+
+    /**
+     * Set the owner of the specified schema
+     */
+    Optional<TrinoPrincipal> getSchemaOwner(Session session, CatalogSchemaName schema);
+
+    /**
+     * Set the owner of the specified schema
+     */
+    void setSchemaOwner(Session session, CatalogSchemaName schema, TrinoPrincipal principal);
+
+    /**
+     * Set the owner of the specified table
+     */
+    void setTableOwner(Session session, CatalogSchemaTableName table, TrinoPrincipal principal);
+
+    /**
+     * Get the identity to run the view as
+     */
+    Optional<Identity> getViewRunAsIdentity(Session session, CatalogSchemaTableName viewName);
+
+    /**
+     * Set the owner of the specified view
+     */
+    void setViewOwner(Session session, CatalogSchemaTableName view, TrinoPrincipal principal);
+
+    /**
+     * A schema was created
+     */
+    void schemaCreated(Session session, CatalogSchemaName schema);
+
+    /**
+     * A schema was renamed
+     */
+    void schemaRenamed(Session session, CatalogSchemaName sourceSchema, CatalogSchemaName targetSchema);
+
+    /**
+     * A schema was dropped
+     */
+    void schemaDropped(Session session, CatalogSchemaName schema);
+
+    /**
+     * A table or view was created
+     */
+    void tableCreated(Session session, CatalogSchemaTableName table);
+
+    /**
+     * A table or view was renamed
+     */
+    void tableRenamed(Session session, CatalogSchemaTableName sourceTable, CatalogSchemaTableName targetTable);
+
+    /**
+     * A table or view was dropped
+     */
+    void tableDropped(Session session, CatalogSchemaTableName table);
 }

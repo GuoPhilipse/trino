@@ -31,9 +31,10 @@ Note that the ``ImmutableSet`` class is a utility class from Guava.
 The ``getFunctions()`` method contains all of the classes for the functions
 that we will implement below in this tutorial.
 
-For a full example in the codebase, see either the ``trino-ml`` module for machine
-learning functions or the ``trino-teradata-functions`` module for Teradata-compatible
-functions, both in the root of the Trino source.
+For a full example in the codebase, see either the ``trino-ml`` module for
+machine learning functions or the ``trino-teradata-functions`` module for
+Teradata-compatible functions, both in the ``plugin`` directory of the Trino
+source.
 
 Scalar function implementation
 ------------------------------
@@ -309,8 +310,8 @@ Deprecated function
 -------------------
 
 The ``@Deprecated`` annotation has to be used on any function that should no longer be
-used. The annotation causes Trino to generate a warning whenever a SQL statement
-uses a deprecated function. When a function is deprecated, the ``@Description``
+used. The annotation causes Trino to generate a warning whenever SQL statements
+use a deprecated function. When a function is deprecated, the ``@Description``
 needs to be replaced with a note about the deprecation and the replacement function:
 
 .. code-block:: java

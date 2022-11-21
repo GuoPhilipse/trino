@@ -16,6 +16,7 @@ package io.trino.plugin.cassandra;
 import io.trino.spi.connector.ConnectorInsertTableHandle;
 import io.trino.spi.connector.ConnectorOutputTableHandle;
 import io.trino.spi.connector.ConnectorPageSink;
+import io.trino.spi.connector.ConnectorPageSinkId;
 import io.trino.spi.connector.ConnectorPageSinkProvider;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTransactionHandle;
@@ -28,24 +29,30 @@ import static java.util.Objects.requireNonNull;
 public class CassandraPageSinkProvider
         implements ConnectorPageSinkProvider
 {
+    private final CassandraTypeManager cassandraTypeManager;
     private final CassandraSession cassandraSession;
     private final int batchSize;
 
     @Inject
-    public CassandraPageSinkProvider(CassandraSession cassandraSession, CassandraClientConfig cassandraClientConfig)
+    public CassandraPageSinkProvider(
+            CassandraTypeManager cassandraTypeManager,
+            CassandraSession cassandraSession,
+            CassandraClientConfig cassandraClientConfig)
     {
+        this.cassandraTypeManager = requireNonNull(cassandraTypeManager, "cassandraTypeManager is null");
         this.cassandraSession = requireNonNull(cassandraSession, "cassandraSession is null");
-        this.batchSize = requireNonNull(cassandraClientConfig, "cassandraClientConfig is null").getBatchSize();
+        this.batchSize = cassandraClientConfig.getBatchSize();
     }
 
     @Override
-    public ConnectorPageSink createPageSink(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorOutputTableHandle tableHandle)
+    public ConnectorPageSink createPageSink(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorOutputTableHandle tableHandle, ConnectorPageSinkId pageSinkId)
     {
         requireNonNull(tableHandle, "tableHandle is null");
         checkArgument(tableHandle instanceof CassandraOutputTableHandle, "tableHandle is not an instance of CassandraOutputTableHandle");
         CassandraOutputTableHandle handle = (CassandraOutputTableHandle) tableHandle;
 
         return new CassandraPageSink(
+                cassandraTypeManager,
                 cassandraSession,
                 cassandraSession.getProtocolVersion(),
                 handle.getSchemaName(),
@@ -57,13 +64,14 @@ public class CassandraPageSinkProvider
     }
 
     @Override
-    public ConnectorPageSink createPageSink(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorInsertTableHandle tableHandle)
+    public ConnectorPageSink createPageSink(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorInsertTableHandle tableHandle, ConnectorPageSinkId pageSinkId)
     {
         requireNonNull(tableHandle, "tableHandle is null");
         checkArgument(tableHandle instanceof CassandraInsertTableHandle, "tableHandle is not an instance of ConnectorInsertTableHandle");
         CassandraInsertTableHandle handle = (CassandraInsertTableHandle) tableHandle;
 
         return new CassandraPageSink(
+                cassandraTypeManager,
                 cassandraSession,
                 cassandraSession.getProtocolVersion(),
                 handle.getSchemaName(),

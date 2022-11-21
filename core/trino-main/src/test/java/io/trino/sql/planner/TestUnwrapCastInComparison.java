@@ -417,6 +417,100 @@ public class TestUnwrapCastInComparison
     }
 
     @Test
+    public void testCastDateToTimestampWithTimeZone()
+    {
+        Session session = getQueryRunner().getDefaultSession();
+
+        Session utcSession = withZone(session, TimeZoneKey.UTC_KEY);
+        // east of Greenwich
+        Session warsawSession = withZone(session, TimeZoneKey.getTimeZoneKey("Europe/Warsaw"));
+        // west of Greenwich
+        Session losAngelesSession = withZone(session, TimeZoneKey.getTimeZoneKey("America/Los_Angeles"));
+
+        // same zone
+        testUnwrap(utcSession, "date", "a > TIMESTAMP '2020-10-26 11:02:18 UTC'", "a > DATE '2020-10-26'");
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-10-26 11:02:18 Europe/Warsaw'", "a > DATE '2020-10-26'");
+        testUnwrap(losAngelesSession, "date", "a > TIMESTAMP '2020-10-26 11:02:18 America/Los_Angeles'", "a > DATE '2020-10-26'");
+
+        // different zone
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-10-26 11:02:18 UTC'", "a > DATE '2020-10-26'");
+        testUnwrap(losAngelesSession, "date", "a > TIMESTAMP '2020-10-26 11:02:18 UTC'", "a > DATE '2020-10-26'");
+
+        // maximum precision
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-10-26 11:02:18.123456789321 UTC'", "a > DATE '2020-10-26'");
+        testUnwrap(losAngelesSession, "date", "a > TIMESTAMP '2020-10-26 11:02:18.123456789321 UTC'", "a > DATE '2020-10-26'");
+
+        // DST forward -- Warsaw changed clock 1h forward on 2020-03-29T01:00 UTC (2020-03-29T02:00 local time)
+        // Note that in given session input TIMESTAMP values  2020-03-29 02:31 and 2020-03-29 03:31 produce the same value 2020-03-29 01:31 UTC (conversion is not monotonic)
+        // last before
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-03-29 00:59:59 UTC'", "a > DATE '2020-03-29'");
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-03-29 00:59:59.999 UTC'", "a > DATE '2020-03-29'");
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-03-29 00:59:59.13 UTC'", "a > DATE '2020-03-29'");
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-03-29 00:59:59.999999 UTC'", "a > DATE '2020-03-29'");
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-03-29 00:59:59.999999999 UTC'", "a > DATE '2020-03-29'");
+        testUnwrap(warsawSession, "date", "a > TIMESTAMP '2020-03-29 00:59:59.999999999999 UTC'", "a > DATE '2020-03-29'");
+
+        // equal
+        testUnwrap(utcSession, "date", "a = TIMESTAMP '1981-06-22 00:00:00 UTC'", "a = DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a = TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a = DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a = TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a = DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a = TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a = DATE '1981-06-22'");
+
+        // not equal
+        testUnwrap(utcSession, "date", "a <> TIMESTAMP '1981-06-22 00:00:00 UTC'", "a <> DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a <> TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a <> DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a <> TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a <> DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a <> TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a <> DATE '1981-06-22'");
+
+        // less than
+        testUnwrap(utcSession, "date", "a < TIMESTAMP '1981-06-22 00:00:00 UTC'", "a < DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a < TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a < DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a < TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a < DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a < TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a < DATE '1981-06-22'");
+
+        // less than or equal
+        testUnwrap(utcSession, "date", "a <= TIMESTAMP '1981-06-22 00:00:00 UTC'", "a <= DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a <= TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a <= DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a <= TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a <= DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a <= TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a <= DATE '1981-06-22'");
+
+        // greater than
+        testUnwrap(utcSession, "date", "a > TIMESTAMP '1981-06-22 00:00:00 UTC'", "a > DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a > TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a > DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a > TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a > DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a > TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a > DATE '1981-06-22'");
+
+        // greater than or equal
+        testUnwrap(utcSession, "date", "a >= TIMESTAMP '1981-06-22 00:00:00 UTC'", "a >= DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a >= TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a >= DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a >= DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a >= DATE '1981-06-22'");
+
+        // is distinct
+        testUnwrap(utcSession, "date", "a IS DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00 UTC'", "a IS DISTINCT FROM DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a IS DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a IS DISTINCT FROM DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a IS DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a IS DISTINCT FROM DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a IS DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a IS DISTINCT FROM DATE '1981-06-22'");
+
+        // is not distinct
+        testUnwrap(utcSession, "date", "a IS NOT DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00 UTC'", "a IS NOT DISTINCT FROM DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a IS NOT DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00.000000 UTC'", "a IS NOT DISTINCT FROM DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a IS NOT DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00.000000000 UTC'", "a IS NOT DISTINCT FROM DATE '1981-06-22'");
+        testUnwrap(utcSession, "date", "a IS NOT DISTINCT FROM TIMESTAMP '1981-06-22 00:00:00.000000000000 UTC'", "a IS NOT DISTINCT FROM DATE '1981-06-22'");
+
+        // null date literal
+        testUnwrap("date", "CAST(a AS TIMESTAMP WITH TIME ZONE) = NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("date", "CAST(a AS TIMESTAMP WITH TIME ZONE) < NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("date", "CAST(a AS TIMESTAMP WITH TIME ZONE) <= NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("date", "CAST(a AS TIMESTAMP WITH TIME ZONE) > NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("date", "CAST(a AS TIMESTAMP WITH TIME ZONE) >= NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("date", "CAST(a AS TIMESTAMP WITH TIME ZONE) IS DISTINCT FROM NULL", "NOT(CAST(a AS TIMESTAMP WITH TIME ZONE) IS NULL)");
+
+        // timestamp with time zone value on the left
+        testUnwrap(utcSession, "date", "TIMESTAMP '1981-06-22 00:00:00 UTC' = a", "a = DATE '1981-06-22'");
+    }
+
+    @Test
     public void testCastTimestampToTimestampWithTimeZone()
     {
         Session session = getQueryRunner().getDefaultSession();
@@ -552,6 +646,138 @@ public class TestUnwrapCastInComparison
 
         // no implicit cast between DOUBLE->INTEGER
         testUnwrap("double", "CAST(a AS INTEGER) = INTEGER '1'", "CAST(a AS INTEGER) = 1");
+    }
+
+    @Test
+    public void testUnwrapCastTimestampAsDate()
+    {
+        // equal
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000' AND a < TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // not equal
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // less than
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000000'");
+
+        // less than or equal
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // greater than
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // greater than or equal
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000000'");
+
+        // is distinct
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // is not distinct
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000' AND a < TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "CAST(a AS DATE) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "CAST(a AS DATE) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "CAST(a AS DATE) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // null date literal
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) = NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) < NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) <= NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) > NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) >= NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) IS DISTINCT FROM NULL", "NOT(CAST(a AS DATE) IS NULL)");
+
+        // non-optimized expression on the right
+        testUnwrap("timestamp(3)", "CAST(a AS DATE) = DATE '1981-06-22' + INTERVAL '2' DAY", "a >= TIMESTAMP '1981-06-24 00:00:00.000' AND a < TIMESTAMP '1981-06-25 00:00:00.000'");
+
+        // cast on the right
+        testUnwrap("timestamp(3)", "DATE '1981-06-22' = CAST(a AS DATE)", "a >= TIMESTAMP '1981-06-22 00:00:00.000' AND a < TIMESTAMP '1981-06-23 00:00:00.000'");
+    }
+
+    @Test
+    public void testUnwrapConvertTimestatmpToDate()
+    {
+        // equal
+        testUnwrap("timestamp(3)", "date(a) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000' AND a < TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) = DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // not equal
+        testUnwrap("timestamp(3)", "date(a) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) <> DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // less than
+        testUnwrap("timestamp(3)", "date(a) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) < DATE '1981-06-22'", "a < TIMESTAMP '1981-06-22 00:00:00.000000000000'");
+
+        // less than or equal
+        testUnwrap("timestamp(3)", "date(a) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) <= DATE '1981-06-22'", "a < TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // greater than
+        testUnwrap("timestamp(3)", "date(a) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) > DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // greater than or equal
+        testUnwrap("timestamp(3)", "date(a) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) >= DATE '1981-06-22'", "a >= TIMESTAMP '1981-06-22 00:00:00.000000000000'");
+
+        // is distinct
+        testUnwrap("timestamp(3)", "date(a) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) IS DISTINCT FROM DATE '1981-06-22'", "a IS NULL OR a < TIMESTAMP '1981-06-22 00:00:00.000000000000' OR a >= TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // is not distinct
+        testUnwrap("timestamp(3)", "date(a) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000' AND a < TIMESTAMP '1981-06-23 00:00:00.000'");
+        testUnwrap("timestamp(6)", "date(a) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000'");
+        testUnwrap("timestamp(9)", "date(a) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000'");
+        testUnwrap("timestamp(12)", "date(a) IS NOT DISTINCT FROM DATE '1981-06-22'", "(NOT a IS NULL) AND a >= TIMESTAMP '1981-06-22 00:00:00.000000000000' AND a < TIMESTAMP '1981-06-23 00:00:00.000000000000'");
+
+        // null date literal
+        testUnwrap("timestamp(3)", "date(a) = NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "date(a) < NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "date(a) <= NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "date(a) > NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "date(a) >= NULL", "CAST(NULL AS BOOLEAN)");
+        testUnwrap("timestamp(3)", "date(a) IS DISTINCT FROM NULL", "NOT(CAST(a AS DATE) IS NULL)");
+
+        // non-optimized expression on the right
+        testUnwrap("timestamp(3)", "date(a) = DATE '1981-06-22' + INTERVAL '2' DAY", "a >= TIMESTAMP '1981-06-24 00:00:00.000' AND a < TIMESTAMP '1981-06-25 00:00:00.000'");
+
+        // cast on the right
+        testUnwrap("timestamp(3)", "DATE '1981-06-22' = date(a)", "a >= TIMESTAMP '1981-06-22 00:00:00.000' AND a < TIMESTAMP '1981-06-23 00:00:00.000'");
     }
 
     private void testNoUnwrap(String inputType, String inputPredicate, String expectedCastType)

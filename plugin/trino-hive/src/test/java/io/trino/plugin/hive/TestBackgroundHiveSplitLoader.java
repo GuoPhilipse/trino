@@ -23,8 +23,15 @@ import com.google.common.collect.ListMultimap;
 import io.airlift.stats.CounterStat;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
+import io.trino.hdfs.DynamicHdfsConfiguration;
+import io.trino.hdfs.HdfsConfig;
+import io.trino.hdfs.HdfsConfigurationInitializer;
+import io.trino.hdfs.HdfsEnvironment;
+import io.trino.hdfs.authentication.NoHdfsAuthentication;
 import io.trino.plugin.hive.HiveColumnHandle.ColumnType;
-import io.trino.plugin.hive.authentication.NoHdfsAuthentication;
+import io.trino.plugin.hive.fs.CachingDirectoryLister;
+import io.trino.plugin.hive.fs.DirectoryLister;
+import io.trino.plugin.hive.fs.TrinoFileStatus;
 import io.trino.plugin.hive.metastore.Column;
 import io.trino.plugin.hive.metastore.StorageFormat;
 import io.trino.plugin.hive.metastore.Table;
@@ -32,6 +39,7 @@ import io.trino.plugin.hive.util.HiveBucketing.HiveBucketFilter;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorSession;
+import io.trino.spi.connector.ConnectorSplitSource.ConnectorSplitBatch;
 import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.Domain;
@@ -76,18 +84,21 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
-import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
+import static com.google.common.io.Resources.getResource;
+import static io.airlift.concurrent.MoreFutures.unmodifiableFuture;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static io.airlift.slice.Slices.utf8Slice;
 import static io.airlift.units.DataSize.Unit.GIGABYTE;
@@ -104,19 +115,17 @@ import static io.trino.plugin.hive.HiveStorageFormat.AVRO;
 import static io.trino.plugin.hive.HiveStorageFormat.CSV;
 import static io.trino.plugin.hive.HiveTestUtils.HDFS_ENVIRONMENT;
 import static io.trino.plugin.hive.HiveTestUtils.SESSION;
-import static io.trino.plugin.hive.HiveTestUtils.TYPE_MANAGER;
 import static io.trino.plugin.hive.HiveTestUtils.getHiveSession;
 import static io.trino.plugin.hive.HiveTimestampPrecision.DEFAULT_PRECISION;
 import static io.trino.plugin.hive.HiveType.HIVE_INT;
 import static io.trino.plugin.hive.HiveType.HIVE_STRING;
-import static io.trino.plugin.hive.acid.AcidTransaction.NO_ACID_TRANSACTION;
 import static io.trino.plugin.hive.util.HiveBucketing.BucketingVersion.BUCKETING_V1;
 import static io.trino.plugin.hive.util.HiveUtil.getRegularColumnHandles;
-import static io.trino.spi.connector.NotPartitionedPartitionHandle.NOT_PARTITIONED;
 import static io.trino.spi.predicate.TupleDomain.withColumnDomains;
 import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.testing.assertions.TrinoExceptionAssert.assertTrinoExceptionThrownBy;
+import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.concurrent.Executors.newCachedThreadPool;
@@ -327,7 +336,7 @@ public class TestBackgroundHiveSplitLoader
                 PARTITIONED_TABLE,
                 Optional.of(
                         new HiveBucketHandle(
-                                getRegularColumnHandles(PARTITIONED_TABLE, TYPE_MANAGER, DEFAULT_PRECISION),
+                                getRegularColumnHandles(PARTITIONED_TABLE, TESTING_TYPE_MANAGER, DEFAULT_PRECISION),
                                 BUCKETING_V1,
                                 BUCKET_COUNT,
                                 BUCKET_COUNT,
@@ -352,9 +361,7 @@ public class TestBackgroundHiveSplitLoader
         backgroundHiveSplitLoader.start(hiveSplitSource);
 
         List<HiveSplit> splits = drainSplits(hiveSplitSource);
-        assertEquals(splits.size(), 1);
-        assertEquals(splits.get(0).getPath(), RETURNED_PATH.toString());
-        assertEquals(splits.get(0).getLength(), 0);
+        assertEquals(splits.size(), 0);
     }
 
     @Test
@@ -380,16 +387,22 @@ public class TestBackgroundHiveSplitLoader
                 new DynamicFilter()
                 {
                     @Override
+                    public Set<ColumnHandle> getColumnsCovered()
+                    {
+                        return ImmutableSet.of();
+                    }
+
+                    @Override
                     public CompletableFuture<?> isBlocked()
                     {
-                        return CompletableFuture.runAsync(() -> {
+                        return unmodifiableFuture(CompletableFuture.runAsync(() -> {
                             try {
                                 TimeUnit.HOURS.sleep(1);
                             }
                             catch (InterruptedException e) {
                                 throw new IllegalStateException(e);
                             }
-                        });
+                        }));
                     }
 
                     @Override
@@ -506,8 +519,7 @@ public class TestBackgroundHiveSplitLoader
 
         BackgroundHiveSplitLoader backgroundHiveSplitLoader = new BackgroundHiveSplitLoader(
                 SIMPLE_TABLE,
-                NO_ACID_TRANSACTION,
-                () -> new Iterator<>()
+                new Iterator<>()
                 {
                     private boolean threw;
 
@@ -532,7 +544,7 @@ public class TestBackgroundHiveSplitLoader
                 TupleDomain.all(),
                 DynamicFilter.EMPTY,
                 new Duration(0, SECONDS),
-                TYPE_MANAGER,
+                TESTING_TYPE_MANAGER,
                 createBucketSplitInfo(Optional.empty(), Optional.empty()),
                 SESSION,
                 new TestingHdfsEnvironment(TEST_FILES),
@@ -543,7 +555,9 @@ public class TestBackgroundHiveSplitLoader
                 false,
                 false,
                 true,
-                Optional.empty());
+                Optional.empty(),
+                Optional.empty(),
+                100);
 
         HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
         backgroundHiveSplitLoader.start(hiveSplitSource);
@@ -818,7 +832,7 @@ public class TestBackgroundHiveSplitLoader
     @Test
     public void testValidateFileBuckets()
     {
-        ListMultimap<Integer, LocatedFileStatus> bucketFiles = ArrayListMultimap.create();
+        ListMultimap<Integer, TrinoFileStatus> bucketFiles = ArrayListMultimap.create();
         bucketFiles.put(1, null);
         bucketFiles.put(3, null);
         bucketFiles.put(4, null);
@@ -849,10 +863,10 @@ public class TestBackgroundHiveSplitLoader
     public void testBuildManifestFileIterator()
             throws Exception
     {
-        CachingDirectoryLister directoryLister = new CachingDirectoryLister(new Duration(5, TimeUnit.MINUTES), 1000, ImmutableList.of());
+        CachingDirectoryLister directoryLister = new CachingDirectoryLister(new Duration(0, TimeUnit.MINUTES), 0, ImmutableList.of());
         Properties schema = new Properties();
         schema.setProperty(FILE_INPUT_FORMAT, SymlinkTextInputFormat.class.getName());
-        schema.setProperty(SERIALIZATION_LIB, AVRO.getSerDe());
+        schema.setProperty(SERIALIZATION_LIB, AVRO.getSerde());
 
         Path firstFilePath = new Path("hdfs://VOL1:9000/db_name/table_name/file1");
         Path secondFilePath = new Path("hdfs://VOL1:9000/db_name/table_name/file2");
@@ -890,7 +904,7 @@ public class TestBackgroundHiveSplitLoader
         CachingDirectoryLister directoryLister = new CachingDirectoryLister(new Duration(5, TimeUnit.MINUTES), 1000, ImmutableList.of());
         Properties schema = new Properties();
         schema.setProperty(FILE_INPUT_FORMAT, SymlinkTextInputFormat.class.getName());
-        schema.setProperty(SERIALIZATION_LIB, AVRO.getSerDe());
+        schema.setProperty(SERIALIZATION_LIB, AVRO.getSerde());
 
         Path filePath = new Path("hdfs://VOL1:9000/db_name/table_name/file1");
         Path directoryPath = new Path("hdfs://VOL1:9000/db_name/table_name/dir");
@@ -917,6 +931,94 @@ public class TestBackgroundHiveSplitLoader
         assertTrue(splitIterator.isEmpty());
     }
 
+    @Test
+    public void testMaxPartitions()
+            throws Exception
+    {
+        CachingDirectoryLister directoryLister = new CachingDirectoryLister(new Duration(0, TimeUnit.MINUTES), 0, ImmutableList.of());
+        // zero partitions
+        {
+            BackgroundHiveSplitLoader backgroundHiveSplitLoader = backgroundHiveSplitLoader(
+                    ImmutableList.of(),
+                    ImmutableList.of(),
+                    directoryLister,
+                    0);
+            HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
+            backgroundHiveSplitLoader.start(hiveSplitSource);
+            assertThat(drainSplits(hiveSplitSource)).isEmpty();
+        }
+
+        // single partition, not crossing the limit
+        {
+            BackgroundHiveSplitLoader backgroundHiveSplitLoader = backgroundHiveSplitLoader(
+                    ImmutableList.of(createPartitionMetadata()),
+                    TEST_FILES,
+                    directoryLister,
+                    1);
+            HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
+            backgroundHiveSplitLoader.start(hiveSplitSource);
+            assertThat(drainSplits(hiveSplitSource)).hasSize(TEST_FILES.size());
+        }
+
+        // single partition, crossing the limit
+        {
+            int partitionLimit = 0;
+            BackgroundHiveSplitLoader backgroundHiveSplitLoader = backgroundHiveSplitLoader(
+                    ImmutableList.of(createPartitionMetadata()),
+                    TEST_FILES,
+                    directoryLister,
+                    partitionLimit);
+            HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
+            backgroundHiveSplitLoader.start(hiveSplitSource);
+            assertThatThrownBy(() -> drainSplits(hiveSplitSource))
+                    .isInstanceOf(TrinoException.class)
+                    .hasMessage(format(
+                            "Query over table '%s' can potentially read more than %s partitions",
+                            SIMPLE_TABLE.getSchemaTableName(),
+                            partitionLimit));
+        }
+
+        // multiple partitions, not crossing the limit
+        {
+            int partitionLimit = 3;
+            List<HivePartitionMetadata> partitions = ImmutableList.of(createPartitionMetadata(), createPartitionMetadata(), createPartitionMetadata());
+            BackgroundHiveSplitLoader backgroundHiveSplitLoader = backgroundHiveSplitLoader(
+                    partitions,
+                    TEST_FILES,
+                    directoryLister,
+                    partitionLimit);
+            HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
+            backgroundHiveSplitLoader.start(hiveSplitSource);
+            assertThat(drainSplits(hiveSplitSource)).hasSize(TEST_FILES.size() * partitions.size());
+        }
+
+        // multiple partitions, crossing the limit
+        {
+            int partitionLimit = 3;
+            BackgroundHiveSplitLoader backgroundHiveSplitLoader = backgroundHiveSplitLoader(
+                    ImmutableList.of(createPartitionMetadata(), createPartitionMetadata(), createPartitionMetadata(), createPartitionMetadata()),
+                    TEST_FILES,
+                    directoryLister,
+                    partitionLimit);
+            HiveSplitSource hiveSplitSource = hiveSplitSource(backgroundHiveSplitLoader);
+            backgroundHiveSplitLoader.start(hiveSplitSource);
+            assertThatThrownBy(() -> drainSplits(hiveSplitSource))
+                    .isInstanceOf(TrinoException.class)
+                    .hasMessage(format(
+                            "Query over table '%s' can potentially read more than %s partitions",
+                            SIMPLE_TABLE.getSchemaTableName(),
+                            partitionLimit));
+        }
+    }
+
+    private static HivePartitionMetadata createPartitionMetadata()
+    {
+        return new HivePartitionMetadata(
+                new HivePartition(SIMPLE_TABLE.getSchemaTableName()),
+                Optional.empty(),
+                TableToPartitionMapping.empty());
+    }
+
     private static void createOrcAcidFile(File file)
             throws IOException
     {
@@ -930,7 +1032,7 @@ public class TestBackgroundHiveSplitLoader
             Files.write(file.toPath(), String.valueOf(orcAcidVersion).getBytes(UTF_8));
             return;
         }
-        checkState(file.createNewFile(), "Failed to create file %s", file);
+        Files.copy(getResource("fullacidNationTableWithOriginalFiles/000000_0").openStream(), file.toPath());
     }
 
     private static List<String> drain(HiveSplitSource source)
@@ -946,8 +1048,15 @@ public class TestBackgroundHiveSplitLoader
     {
         ImmutableList.Builder<HiveSplit> splits = ImmutableList.builder();
         while (!source.isFinished()) {
-            source.getNextBatch(NOT_PARTITIONED, 100).get()
-                    .getSplits().stream()
+            ConnectorSplitBatch batch;
+            try {
+                batch = source.getNextBatch(100).get();
+            }
+            catch (ExecutionException e) {
+                throwIfUnchecked(e.getCause());
+                throw e;
+            }
+            batch.getSplits().stream()
                     .map(HiveSplit.class::cast)
                     .forEach(splits::add);
         }
@@ -1052,12 +1161,11 @@ public class TestBackgroundHiveSplitLoader
 
         return new BackgroundHiveSplitLoader(
                 table,
-                NO_ACID_TRANSACTION,
-                hivePartitionMetadatas,
+                hivePartitionMetadatas.iterator(),
                 compactEffectivePredicate,
                 dynamicFilter,
                 dynamicFilteringProbeBlockingTimeout,
-                TYPE_MANAGER,
+                TESTING_TYPE_MANAGER,
                 createBucketSplitInfo(bucketHandle, hiveBucketFilter),
                 SESSION,
                 hdfsEnvironment,
@@ -1068,28 +1176,39 @@ public class TestBackgroundHiveSplitLoader
                 false,
                 false,
                 true,
-                validWriteIds);
+                validWriteIds,
+                Optional.empty(),
+                100);
     }
 
-    private BackgroundHiveSplitLoader backgroundHiveSplitLoader(List<LocatedFileStatus> files, DirectoryLister directoryLister)
+    private BackgroundHiveSplitLoader backgroundHiveSplitLoader(
+            List<LocatedFileStatus> files,
+            DirectoryLister directoryLister)
     {
-        List<HivePartitionMetadata> hivePartitionMetadatas = ImmutableList.of(
+        List<HivePartitionMetadata> partitions = ImmutableList.of(
                 new HivePartitionMetadata(
                         new HivePartition(new SchemaTableName("testSchema", "table_name")),
                         Optional.empty(),
                         TableToPartitionMapping.empty()));
+        return backgroundHiveSplitLoader(partitions, files, directoryLister, 100);
+    }
 
+    private BackgroundHiveSplitLoader backgroundHiveSplitLoader(
+            List<HivePartitionMetadata> partitions,
+            List<LocatedFileStatus> files,
+            DirectoryLister directoryLister,
+            int maxPartitions)
+    {
         ConnectorSession connectorSession = getHiveSession(new HiveConfig()
                 .setMaxSplitSize(DataSize.of(1, GIGABYTE)));
 
         return new BackgroundHiveSplitLoader(
                 SIMPLE_TABLE,
-                NO_ACID_TRANSACTION,
-                hivePartitionMetadatas,
+                partitions.iterator(),
                 TupleDomain.none(),
                 DynamicFilter.EMPTY,
                 new Duration(0, SECONDS),
-                TYPE_MANAGER,
+                TESTING_TYPE_MANAGER,
                 Optional.empty(),
                 connectorSession,
                 new TestingHdfsEnvironment(files),
@@ -1100,39 +1219,42 @@ public class TestBackgroundHiveSplitLoader
                 false,
                 false,
                 true,
-                Optional.empty());
+                Optional.empty(),
+                Optional.empty(),
+                maxPartitions);
     }
 
-    private static BackgroundHiveSplitLoader backgroundHiveSplitLoaderOfflinePartitions()
+    private BackgroundHiveSplitLoader backgroundHiveSplitLoaderOfflinePartitions()
     {
         ConnectorSession connectorSession = getHiveSession(new HiveConfig()
                 .setMaxSplitSize(DataSize.of(1, GIGABYTE)));
 
         return new BackgroundHiveSplitLoader(
                 SIMPLE_TABLE,
-                NO_ACID_TRANSACTION,
                 createPartitionMetadataWithOfflinePartitions(),
                 TupleDomain.all(),
                 DynamicFilter.EMPTY,
                 new Duration(0, SECONDS),
-                TYPE_MANAGER,
+                TESTING_TYPE_MANAGER,
                 createBucketSplitInfo(Optional.empty(), Optional.empty()),
                 connectorSession,
                 new TestingHdfsEnvironment(TEST_FILES),
                 new NamenodeStats(),
                 new CachingDirectoryLister(new HiveConfig()),
-                directExecutor(),
+                executor,
                 2,
                 false,
                 false,
                 true,
-                Optional.empty());
+                Optional.empty(),
+                Optional.empty(),
+                100);
     }
 
-    private static Iterable<HivePartitionMetadata> createPartitionMetadataWithOfflinePartitions()
+    private static Iterator<HivePartitionMetadata> createPartitionMetadataWithOfflinePartitions()
             throws RuntimeException
     {
-        return () -> new AbstractIterator<>()
+        return new AbstractIterator<>()
         {
             // This iterator is crafted to return a valid partition for the first calls to
             // hasNext() and next(), and then it should throw for the second call to hasNext()
@@ -1169,7 +1291,8 @@ public class TestBackgroundHiveSplitLoader
                 Integer.MAX_VALUE,
                 hiveSplitLoader,
                 executor,
-                new CounterStat());
+                new CounterStat(),
+                false);
     }
 
     private static Table table(
@@ -1231,7 +1354,7 @@ public class TestBackgroundHiveSplitLoader
 
         return tableBuilder
                 .setDatabaseName("test_dbname")
-                .setOwner("testOwner")
+                .setOwner(Optional.of("testOwner"))
                 .setTableName("test_table")
                 .setTableType(TableType.MANAGED_TABLE.toString())
                 .setDataColumns(ImmutableList.of(new Column("col1", HIVE_STRING, Optional.empty())))
@@ -1242,7 +1365,7 @@ public class TestBackgroundHiveSplitLoader
 
     private static LocatedFileStatus locatedFileStatus(Path path)
     {
-        return locatedFileStatus(path, 0);
+        return locatedFileStatus(path, 10);
     }
 
     private static LocatedFileStatus locatedFileStatus(Path path, long fileLength)
@@ -1304,7 +1427,7 @@ public class TestBackgroundHiveSplitLoader
         public TestingHdfsEnvironment(List<LocatedFileStatus> files)
         {
             super(
-                    new HiveHdfsConfiguration(
+                    new DynamicHdfsConfiguration(
                             new HdfsConfigurationInitializer(new HdfsConfig()),
                             ImmutableSet.of()),
                     new HdfsConfig(),

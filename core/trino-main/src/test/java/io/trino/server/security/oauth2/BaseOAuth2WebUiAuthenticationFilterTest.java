@@ -15,11 +15,10 @@ package io.trino.server.security.oauth2;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.inject.Key;
 import io.airlift.log.Level;
 import io.airlift.log.Logging;
 import io.airlift.testing.Closeables;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.impl.DefaultClaims;
 import io.trino.server.testing.TestingTrinoServer;
 import io.trino.server.ui.OAuth2WebUiAuthenticationFilter;
@@ -51,6 +50,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static io.trino.client.OkHttpUtil.setupInsecureSsl;
+import static io.trino.server.security.jwt.JwtUtil.newJwtBuilder;
 import static io.trino.server.security.oauth2.TokenEndpointAuthMethod.CLIENT_SECRET_BASIC;
 import static io.trino.server.ui.OAuthWebUiCookie.OAUTH2_COOKIE;
 import static javax.servlet.http.HttpServletResponse.SC_OK;
@@ -96,6 +96,7 @@ public abstract class BaseOAuth2WebUiAuthenticationFilterTest
             throws Exception
     {
         logging.setLevel(OAuth2WebUiAuthenticationFilter.class.getName(), Level.DEBUG);
+        logging.setLevel(OAuth2Service.class.getName(), Level.DEBUG);
 
         hydraIdP = getHydraIdp();
         String idpUrl = "https://localhost:" + hydraIdP.getAuthPort();
@@ -105,6 +106,7 @@ public abstract class BaseOAuth2WebUiAuthenticationFilterTest
                 .setAdditionalModule(new WebUiModule())
                 .setProperties(getOAuth2Config(idpUrl))
                 .build();
+        server.getInstance(Key.get(OAuth2Client.class)).load();
         server.waitForNodeRefresh(Duration.ofSeconds(10));
         serverUri = server.getHttpsBaseUrl();
         uiUri = serverUri.resolve("/ui/");
@@ -139,6 +141,7 @@ public abstract class BaseOAuth2WebUiAuthenticationFilterTest
             throws Exception
     {
         logging.clearLevel(OAuth2WebUiAuthenticationFilter.class.getName());
+        logging.clearLevel(OAuth2Service.class.getName());
         Closeables.closeAll(server, hydraIdP);
     }
 
@@ -169,10 +172,9 @@ public abstract class BaseOAuth2WebUiAuthenticationFilterTest
             throws NoSuchAlgorithmException, IOException
     {
         KeyPairGenerator keyGenerator = KeyPairGenerator.getInstance("RSA");
-        SignatureAlgorithm signatureAlgorithm = SignatureAlgorithm.RS256;
         keyGenerator.initialize(4096);
         long now = Instant.now().getEpochSecond();
-        String token = Jwts.builder()
+        String token = newJwtBuilder()
                 .setHeaderParam("alg", "RS256")
                 .setHeaderParam("kid", "public:f467aa08-1c1b-4cde-ba45-84b0ef5d2ba8")
                 .setHeaderParam("typ", "JWT")
@@ -188,8 +190,8 @@ public abstract class BaseOAuth2WebUiAuthenticationFilterTest
                                         .put("nbf", now)
                                         .put("scp", ImmutableList.of("openid"))
                                         .put("sub", "foo@bar.com")
-                                        .build()))
-                .signWith(signatureAlgorithm, keyGenerator.generateKeyPair().getPrivate())
+                                        .buildOrThrow()))
+                .signWith(keyGenerator.generateKeyPair().getPrivate())
                 .compact();
         try (Response response = httpClientWithOAuth2Cookie(token, false)
                 .newCall(uiCall().build())
@@ -203,10 +205,10 @@ public abstract class BaseOAuth2WebUiAuthenticationFilterTest
             throws IOException
     {
         String token = hydraIdP.getToken(UNTRUSTED_CLIENT_ID, UNTRUSTED_CLIENT_SECRET, ImmutableList.of(UNTRUSTED_CLIENT_AUDIENCE));
-        try (Response response = httpClientWithOAuth2Cookie(token, true)
+        try (Response response = httpClientWithOAuth2Cookie(token, false)
                 .newCall(uiCall().build())
                 .execute()) {
-            assertUnauthorizedResponse(response);
+            assertRedirectResponse(response);
         }
     }
 
@@ -267,7 +269,7 @@ public abstract class BaseOAuth2WebUiAuthenticationFilterTest
     {
         String token = hydraIdP.getToken(TRINO_CLIENT_ID, TRINO_CLIENT_SECRET, ImmutableList.of(TRINO_AUDIENCE));
         assertUICallWithCookie(token);
-        Thread.sleep(TTL_ACCESS_TOKEN_IN_SECONDS.plusSeconds(1).toMillis()); // wait for the token expiration
+        Thread.sleep(TTL_ACCESS_TOKEN_IN_SECONDS.plusSeconds(1).toMillis()); // wait for the token expiration = ttl of access token + 1 sec
         try (Response response = httpClientWithOAuth2Cookie(token, false).newCall(uiCall().build()).execute()) {
             assertRedirectResponse(response);
         }

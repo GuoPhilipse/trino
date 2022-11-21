@@ -4,7 +4,7 @@ The `docs` module contains the reference documentation for Trino.
 
 - [Writing and contributing](#writing-and-contributing)
 - [Tools](#tools)
-- [Faster build for authoring](#faster-build-for-authoring)
+- [Fast doc build option](#fast-doc-build-option)
 - [Default build](#default-build)
 - [Viewing documentation](#viewing-documentation)
 - [Versioning](#versioning)
@@ -208,8 +208,8 @@ contribution](https://trino.io/development/process.html).
 
 2. You might select a GitHub doc issue to work on that requires you to verify
    how Trino handles a situation, such as [adding
-   documentation](https://github.com/trinodb/trino/issues/7660) for a SQL
-   language function.
+   documentation](https://github.com/trinodb/trino/issues/7660) for SQL
+   functions.
 
    In this case, the five-minute video [Learning Trino SQL with
    Docker](https://www.youtube.com/watch?v=y58sb9bW2mA) gives you a starting
